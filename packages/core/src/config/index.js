@@ -911,18 +911,23 @@ Object.assign(defaultConfig.server, {
     '*steamcommunity.com': {
       '^(?!/discussions|/Profile|/app.*/discussions).*$': {
         sni: 'baidu.com',
+        // 【本版定制】抹除 Alt-Svc，阻止浏览器发现 HTTP/3。DS 是 HTTP 代理，
+        // UDP/443 的 QUIC 不会被代理，浏览器一旦走 h3 就完全绕过了 DS。
+        responseReplace: { headers: { 'alt-svc': '[remove]' } },
         desc: '讨论区锁区,考虑不拦截丢给彩蛋',
       },
     },
     '^(?!.*cloudflare).*steamstatic.com$': {
       '.*': {
         sni: 'baidu.com',
+        responseReplace: { headers: { 'alt-svc': '[remove]' } },
         desc: 'steam社区数据不能也不需调整sni,直接直连',
       },
     },
     '^(store|checkout).steampowered.com$': {
       '.*': {
         sni: 'baidu.com',
+        responseReplace: { headers: { 'alt-svc': '[remove]' } },
       },
     },
     'external-content.duckduckgo.com': {
@@ -1098,24 +1103,24 @@ Object.assign(defaultConfig.server, {
     '*steamdb.info': { '.*': { sni: 'baidu.com' } },
 
     // ---- Steam（原版只覆盖 store/checkout/community/.steamstatic.com，以下为缺口）----
-    'api.steampowered.com': { '.*': { sni: 'baidu.com' } },
-    'login.steampowered.com': { '.*': { sni: 'baidu.com' } },
-    'help.steampowered.com': { '.*': { sni: 'baidu.com' } },
-    '*steam-chat.com': { '.*': { sni: 'baidu.com' } },
-    '*cloudflare.steamstatic.com': { '.*': { sni: 'baidu.com' } },
-    '*steamusercontent.com': { '.*': { sni: 'baidu.com' } },
-    '*st.dl.eccdnx.com': { '.*': { sni: 'baidu.com' } },
-    '*queniujq.cn': { '.*': { sni: 'baidu.com' } },
-    'replay.csgo.com.cn': { '.*': { sni: 'baidu.com' } },
-    'steamstore-a.akamaihd.net': { '.*': { sni: 'baidu.com' } },
-    'steamcommunity-a.akamaihd.net': { '.*': { sni: 'baidu.com' } },
-    'steamcdn-a.akamaihd.net': { '.*': { sni: 'baidu.com' } },
-    'steamuserimages-a.akamaihd.net': { '.*': { sni: 'baidu.com' } },
-    'steamvideo-a.akamaihd.net': { '.*': { sni: 'baidu.com' } },
-    'steamusercontent-a.akamaihd.net': { '.*': { sni: 'baidu.com' } },
-    'steambroadcast.akamaized.net': { '.*': { sni: 'baidu.com' } },
-    'steambroadcastchat.akamaized.net': { '.*': { sni: 'baidu.com' } },
-    'epicgames-download1.akamaized.net': { '.*': { sni: 'baidu.com' } },
+    'api.steampowered.com': { '.*': { sni: 'baidu.com', responseReplace: { headers: { 'alt-svc': '[remove]' } } } },
+    'login.steampowered.com': { '.*': { sni: 'baidu.com', responseReplace: { headers: { 'alt-svc': '[remove]' } } } },
+    'help.steampowered.com': { '.*': { sni: 'baidu.com', responseReplace: { headers: { 'alt-svc': '[remove]' } } } },
+    '*steam-chat.com': { '.*': { sni: 'baidu.com', responseReplace: { headers: { 'alt-svc': '[remove]' } } } },
+    '*cloudflare.steamstatic.com': { '.*': { sni: 'baidu.com', responseReplace: { headers: { 'alt-svc': '[remove]' } } } },
+    '*steamusercontent.com': { '.*': { sni: 'baidu.com', responseReplace: { headers: { 'alt-svc': '[remove]' } } } },
+    '*st.dl.eccdnx.com': { '.*': { sni: 'baidu.com', responseReplace: { headers: { 'alt-svc': '[remove]' } } } },
+    '*queniujq.cn': { '.*': { sni: 'baidu.com', responseReplace: { headers: { 'alt-svc': '[remove]' } } } },
+    'replay.csgo.com.cn': { '.*': { sni: 'baidu.com', responseReplace: { headers: { 'alt-svc': '[remove]' } } } },
+    'steamstore-a.akamaihd.net': { '.*': { sni: 'baidu.com', responseReplace: { headers: { 'alt-svc': '[remove]' } } } },
+    'steamcommunity-a.akamaihd.net': { '.*': { sni: 'baidu.com', responseReplace: { headers: { 'alt-svc': '[remove]' } } } },
+    'steamcdn-a.akamaihd.net': { '.*': { sni: 'baidu.com', responseReplace: { headers: { 'alt-svc': '[remove]' } } } },
+    'steamuserimages-a.akamaihd.net': { '.*': { sni: 'baidu.com', responseReplace: { headers: { 'alt-svc': '[remove]' } } } },
+    'steamvideo-a.akamaihd.net': { '.*': { sni: 'baidu.com', responseReplace: { headers: { 'alt-svc': '[remove]' } } } },
+    'steamusercontent-a.akamaihd.net': { '.*': { sni: 'baidu.com', responseReplace: { headers: { 'alt-svc': '[remove]' } } } },
+    'steambroadcast.akamaized.net': { '.*': { sni: 'baidu.com', responseReplace: { headers: { 'alt-svc': '[remove]' } } } },
+    'steambroadcastchat.akamaized.net': { '.*': { sni: 'baidu.com', responseReplace: { headers: { 'alt-svc': '[remove]' } } } },
+    'epicgames-download1.akamaized.net': { '.*': { sni: 'baidu.com', responseReplace: { headers: { 'alt-svc': '[remove]' } } } },
 
     // ---- 云盘 / 下载 ----
     'mega.io': { '.*': { sni: 'baidu.com' } },

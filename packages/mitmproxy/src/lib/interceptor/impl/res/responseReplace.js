@@ -27,21 +27,38 @@ function replaceResponseHeaders (newHeaders, res, proxyRes) {
 
   // 替换响应头
   const needDeleteKeys = []
+  // 【本版定制】真正需要删除的 header 索引（原实现只把值置空字符串，
+  // 部分客户端仍会当作“存在且为空”处理，导致 Alt-Svc 未能彻底抹除）
+  const removeIndexes = []
   for (let i = 0; i < proxyRes.rawHeaders.length; i += 2) {
     const headerKey = proxyRes.rawHeaders[i].toLowerCase()
 
     const newHeaderValue = newHeaders[headerKey]
     if (newHeaderValue != null) {
-      if (newHeaderValue !== proxyRes.rawHeaders[i + 1]) {
+      if (newHeaderValue === REMOVE) { // 由于拦截配置中不允许配置null，会被删，所以配置一个 "[remove]"，当作删除响应头的意思
         preHeaders[headerKey] = proxyRes.rawHeaders[i + 1] // 先保存原先响应头
-        if (newHeaderValue === REMOVE) { // 由于拦截配置中不允许配置null，会被删，所以配置一个 "[remove]"，当作删除响应头的意思
-          proxyRes.rawHeaders[i + 1] = ''
-        } else {
-          proxyRes.rawHeaders[i + 1] = newHeaderValue
-        }
+        removeIndexes.push(i)
+      } else if (newHeaderValue !== proxyRes.rawHeaders[i + 1]) {
+        preHeaders[headerKey] = proxyRes.rawHeaders[i + 1] // 先保存原先响应头
+        proxyRes.rawHeaders[i + 1] = newHeaderValue
       }
       needDeleteKeys.push(headerKey)
     }
+  }
+  // 【本版定制】从 rawHeaders 数组中真正移除需要删除的头（成对删除 key 与 value）
+  if (removeIndexes.length > 0) {
+    const removeSet = new Set()
+    for (const i of removeIndexes) {
+      removeSet.add(i)
+      removeSet.add(i + 1)
+    }
+    const keptHeaders = []
+    for (let i = 0; i < proxyRes.rawHeaders.length; i++) {
+      if (!removeSet.has(i)) {
+        keptHeaders.push(proxyRes.rawHeaders[i])
+      }
+    }
+    proxyRes.rawHeaders = keptHeaders
   }
   // 处理删除响应头
   for (const headerKey of needDeleteKeys) {
