@@ -1005,7 +1005,6 @@ function matchCatalog (catalog, hostname) {
 module.exports = {
   DEFAULT_GROUP,
   SECTIONS,
-  ENHANCED_SECTIONS,
   parseCommentMap,
   getCommentMap,
   injectComments,
