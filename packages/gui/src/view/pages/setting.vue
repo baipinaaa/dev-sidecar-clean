@@ -496,19 +496,6 @@ export default {
         <a-input-number v-model:value="config.app.windowSize.height" :step="50" :min="500" :max="2000" :precision="0" spellcheck="false" />
       </a-form-item>
       <hr>
-      <a-form-item label="自动检查更新" :label-col="labelCol" :wrapper-col="wrapperCol">
-        <a-radio-group v-model:value="config.app.autoChecked" default-value="light" button-style="solid">
-          <a-radio-button :value="true">
-            开启
-          </a-radio-button>
-          <a-radio-button :value="false">
-            关闭
-          </a-radio-button>
-        </a-radio-group>
-        <div class="form-help">
-          开启自动检查更新后，每次应用启动时会检查一次更新，如有新版本，则会弹出提示。
-        </div>
-      </a-form-item>
       <a-form-item label="忽略预发布版本" :label-col="labelCol" :wrapper-col="wrapperCol">
         <a-radio-group v-model:value="config.app.skipPreRelease" default-value="light" button-style="solid">
           <a-radio-button :value="true">

@@ -74,25 +74,9 @@ export default {
     })
   },
   mounted () {
-    // 自动检查更新：等待代理服务启动后再执行，避免代理未就绪时
-    // 直接请求 GitHub API 导致超时或失败
-    const tryAutoCheck = () => {
-      if (!this.config || !this._update) return
-      if (this._update.autoChecked) return
-      if (!this.config.app.autoChecked) return
-      this._update.autoChecked = true
-      this.$watch('status.server.enabled', (enabled) => {
-        if (enabled) {
-          this.doCheckUpdate(false)
-        }
-      }, { immediate: true })
-    }
-    // mounted 时 config 可能尚未加载完毕（created 是 async 的），
-    // 先试一次，不行就等 config 就绪后再试
-    tryAutoCheck()
-    if (!this.config) {
-      this.$watch('config', () => { tryAutoCheck() }, { immediate: true })
-    }
+    // 【本版本定制】已移除启动时自动检查更新。
+    // 原实现会在代理服务就绪后自动请求 GitHub API 检查新版本，属于应用自行发起的网络请求；
+    // 现改为仅在用户主动点击「检查更新」按钮（doCheckUpdate(true)）时才执行。
   },
   methods: {
     /** 按模式写入拦截/测速开关（首页模式选择，已移除「增强模式/ow」） */

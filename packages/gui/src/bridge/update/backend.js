@@ -335,7 +335,9 @@ function updateHandle (app, api, win, beforeQuit, quit, log) {
 
   // 检查更新
   // 只取最近 10 个版本：全量 releases 有 900KB 左右，列表足够判断最新版，且能显著缩短检查时间
-  const releasesApiUrl = 'https://api.github.com/repos/docmirror/dev-sidecar/releases?per_page=10'
+  // 【本版本定制】更新源改为本仓库，避免检查到上游 docmirror/dev-sidecar 的新版本后
+  // 提示用户下载并安装上游安装包，从而覆盖本定制的裁剪（删百度统计等）。
+  const releasesApiUrl = 'https://api.github.com/repos/baipinaaa/dev-sidecar-clean/releases?per_page=10'
   async function checkForUpdatesFromGitHub () {
     const proxy = resolveUpdateProxy()
     if (proxy.error) {
@@ -469,7 +471,7 @@ function updateHandle (app, api, win, beforeQuit, quit, log) {
                 value: {
                   version: onlineVersion,
                   releaseNotes: versionData.body
-                    ? (versionData.body.replace(/\r\n/g, '\n').replace(/https:\/\/github.com\/docmirror\/dev-sidecar/g, '').replace(/(?<=(^|\n))[ \t]*(?:#[ #]*)?#\s*/g, '') || '无')
+                    ? (versionData.body.replace(/\r\n/g, '\n').replace(/https:\/\/github.com\/baipinaaa\/dev-sidecar-clean/g, '').replace(/(?<=(^|\n))[ \t]*(?:#[ #]*)?#\s*/g, '') || '无')
                     : '无',
                   partPackage,
                   fullPackage,
