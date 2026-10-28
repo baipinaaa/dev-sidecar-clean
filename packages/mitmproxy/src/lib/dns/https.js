@@ -11,6 +11,23 @@ const Agent = require('../proxy/common/ProxyHttpAgent')
 
 const dohQueryAsync = promisify(doh.query)
 
+/**
+ * 【定制版新增】DoH 请求必须带 User-Agent。
+ *
+ * 实测：托管在 Cloudflare 上的 DoH 端点（cloudflare-dns.com、各类自建 Total-ECH 端点等）
+ * 对没有 User-Agent 的请求一律返回 403（Cloudflare WAF 拦截空 UA），带任意 UA 即正常返回 200。
+ * 而本客户端原先只发 content-type/accept/content-length，导致这类端点全部失效——
+ * 这也是「ECH 已开启但完全不生效」的直接原因之一。
+ */
+const DEFAULT_USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
+
+/**
+ * 【定制版新增】DoH 请求重试次数。
+ * 实测目标 TLS 握手约 60%~70% 会被中间链路 RST（间歇性干扰），
+ * 且 keepAlive 连接被 RST 后复用必定失败，因此失败后需换新连接重试。
+ */
+const DOH_MAX_ATTEMPTS = 4
+
 function createAgent (dnsServer) {
   return new (dnsServer.startsWith('https:') ? HttpsAgent : Agent)({
     keepAlive: true,
@@ -71,12 +88,14 @@ module.exports = class DNSOverHTTPS extends BaseDNS {
     this.agent = createAgent(this.dnsServer)
   }
 
-  _requestOptions (extraHeaders, timeout) {
+  _requestOptions (extraHeaders, timeout, freshSocket) {
     // 请求参数
+    const headers = { 'user-agent': DEFAULT_USER_AGENT, ...(extraHeaders || {}) }
     const options = {
-      agent: this.agent,
+      // freshSocket: 上一次尝试失败（连接被 RST）时不复用 keepAlive 连接，改用一次性新连接
+      agent: freshSocket ? false : this.agent,
       timeout,
-      headers: extraHeaders,
+      headers,
     }
     if (this.dnsServerName) {
       // 设置SNI
@@ -97,15 +116,22 @@ module.exports = class DNSOverHTTPS extends BaseDNS {
    */
   async _svcbQueryPromise (hostname, type = 'HTTPS') {
     const timeout = 5000
-    try {
-      return await this._svcbQueryByWireFormat(hostname, type, timeout)
-    } catch (e) {
-      log.debug(`[DNS-over-HTTPS '${this.dnsName}'] wire format 查询HTTPS记录失败，改用JSON接口: ${hostname}, error: ${e.message}`)
-      return await this._svcbQueryByJson(hostname, type, timeout)
+    let lastError = null
+    for (let attempt = 0; attempt < DOH_MAX_ATTEMPTS; attempt++) {
+      try {
+        return await this._svcbQueryByWireFormat(hostname, type, timeout, attempt > 0)
+      } catch (e) {
+        lastError = e
+        if (attempt < DOH_MAX_ATTEMPTS - 1) {
+          log.debug(`[DNS-over-HTTPS '${this.dnsName}'] 第 ${attempt + 1} 次查询HTTPS记录失败，重试: ${hostname}, error: ${e.message}`)
+        }
+      }
     }
+    log.debug(`[DNS-over-HTTPS '${this.dnsName}'] wire format 查询HTTPS记录失败，改用JSON接口: ${hostname}, error: ${lastError && lastError.message}`)
+    return await this._svcbQueryByJson(hostname, type, timeout)
   }
 
-  async _svcbQueryByWireFormat (hostname, type, timeout) {
+  async _svcbQueryByWireFormat (hostname, type, timeout, freshSocket) {
     const body = svcbUtil.encodeQuery(hostname, { type: svcbUtil.typeCode(type) })
     const headers = {
       'content-type': 'application/dns-message',
@@ -113,7 +139,7 @@ module.exports = class DNSOverHTTPS extends BaseDNS {
       'content-length': body.length,
     }
 
-    const res = await request(this.dnsServer, this._requestOptions(headers, timeout), body)
+    const res = await request(this.dnsServer, this._requestOptions(headers, timeout, freshSocket), body)
     if (res.statusCode !== 200) {
       throw new Error(`DoH服务返回状态码 ${res.statusCode}`)
     }
@@ -189,6 +215,8 @@ module.exports = class DNSOverHTTPS extends BaseDNS {
     const options = {
       url: this.dnsServer,
       agent: this.agent,
+      // 【定制版新增】同 _requestOptions：不带 User-Agent 会被 Cloudflare 托管的 DoH 端点 403
+      headers: { 'user-agent': DEFAULT_USER_AGENT },
     }
     if (this.dnsServerName) {
       // 设置SNI
