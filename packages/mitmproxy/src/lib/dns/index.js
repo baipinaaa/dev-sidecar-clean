@@ -325,26 +325,25 @@ module.exports = {
   /**
    * 只获取该域名由DNS下发的ECH参数（不含共享ECH配置的兜底逻辑）
    *
-   * 配置了ECH专用DNS（`server.dns.ech.dns`）时，只从该DNS获取；
-   * 否则优先使用该域名映射到的DNS，若该DNS未下发ech参数，则依次尝试其它支持ECH的DNS
+   * 【定制版修改】`server.dns.ech.dns` 从「唯一来源」改为「首选来源」：
+   * 仍然第一时间查询该专用DNS；失败或超时时，自动回退到该域名在 `server.dns.mapping`
+   * 里映射到的 DNS（若它支持ECH），再回退到其它支持ECH的DNS。
+   * 因此用户只需在 `mapping` 里把域名指向自建的 DoH-ECH 端点即可，不必再重复配一遍 `ech.dns`。
    *
    * @returns {Promise<null|object>} 形如 `{ echConfigList, publicName, config, ttl, dnsName, dnsType }`
    */
   async lookupDomainEch (dnsConfig, hostname) {
-    // 指定了ECH专用DNS：只查询该DNS，避免其它DNS的超时阶梯拖慢建连过程
+    const candidates = []
+
+    // 0. ECH专用DNS：优先查询（放在首位，由下面的并发竞赛逻辑保证它先发出）
     const echDns = this.getEchDNS(dnsConfig)
     if (echDns != null) {
-      if (!echDns.echEnabled) {
-        log.warn(`[ECH] ECH专用DNS '${echDns.dnsName}' 未启用ECH查询，无法获取ECH参数: ${hostname}`)
-        return null
+      if (echDns.echEnabled) {
+        candidates.push(echDns)
+      } else {
+        log.warn(`[ECH] ECH专用DNS '${echDns.dnsName}' 未启用ECH查询，将回退到域名映射的DNS: ${hostname}`)
       }
-      return await echDns.lookupEch(hostname).catch((e) => {
-        log.warn(`[ECH][DNS-over-${echDns.dnsType} '${echDns.dnsName}'] 获取ECH参数失败: ${hostname}, error: ${e.message}`)
-        return null
-      })
     }
-
-    const candidates = []
 
     // 1. 该域名映射到的DNS
     const dnsData = this.getDNSAndFamily(dnsConfig, hostname)
