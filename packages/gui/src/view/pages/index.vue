@@ -1,6 +1,6 @@
 <script>
 import lodash from 'lodash'
-import { CheckOutlined, CloseOutlined, ArrowRightOutlined } from '@ant-design/icons-vue'
+import { CheckOutlined, CloseOutlined } from '@ant-design/icons-vue'
 import DsContainer from '../components/container'
 import SetupCa from '../components/setup-ca'
 
@@ -11,7 +11,6 @@ export default {
     SetupCa,
     CheckOutlined,
     CloseOutlined,
-    ArrowRightOutlined,
   },
   data () {
     return {
@@ -57,11 +56,8 @@ export default {
       }
       return false
     },
-    _githubStarBadgeUrl () {
-      // 生成每天更新一次的缓存键，减少API调用频率
-      const today = new Date().toISOString().split('T')[0] // YYYY-MM-DD
-      return `https://img.shields.io/github/stars/docmirror/dev-sidecar?logo=github&cacheSeconds=86400&t=${today}`
-    },
+    // 【本版本定制】已移除 GitHub 星标徽章（_githubStarBadgeUrl）。
+    // 原实现会在每次打开首页时请求第三方 img.shields.io，属于应用自行发起的外部请求。
   },
   async created () {
     await this.doCheckRootCa()
@@ -387,21 +383,7 @@ export default {
     </div>
 
     <SetupCa title="安装证书" v-model:open="setupCa.visible" @setup="handleCaSetuped" />
-    <template #footer>
-      <div v-if="setting.development == null || !setting.development" class="star">
-        <div class="donate" />
-        <div class="right">
-          <div>
-            如果它解决了你的问题，请不要吝啬你的star哟！点这里
-            <ArrowRightOutlined style="margin-right:10px;" />
-          </div>
-          <a @click="openExternal('https://github.com/docmirror/dev-sidecar')"><img
-            alt="GitHub stars"
-            :src="_githubStarBadgeUrl"
-          ></a>
-        </div>
-      </div>
-    </template>
+    <!-- 【本版本定制】已移除 #footer 的 star 模块（内置 img.shields.io 徽章，会发起第三方请求） -->
   </DsContainer>
 </template>
 
@@ -412,34 +394,7 @@ export default {
     text-align: center;
   }
 
-  .star {
-    display: flex;
-    flex-direction: row;
-    align-items: center;
-    justify-content: space-between;
-    padding: 10px;
-    .donate {
-      cursor: pointer;
-    }
-
-    .right {
-      display: flex;
-      flex-direction: row;
-      justify-content: flex-end;
-    }
-
-    > * {
-      margin-right: 10px;
-    }
-
-    a {
-      height: 21px;
-
-      img {
-        height: 21px;
-      }
-    }
-  }
+  /* 【本版本定制】.star 样式已随之移除（原用于 #footer 的 GitHub 星标徽章） */
 
   /* 主控制面板 */
   .main-control-panel {
