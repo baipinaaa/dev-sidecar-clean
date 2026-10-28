@@ -1,12 +1,10 @@
 import Index from '../pages/index'
 import Git from '../pages/plugin/git'
 import Node from '../pages/plugin/node'
-import Overwall from '../pages/plugin/overwall'
 import Pip from '../pages/plugin/pip'
 import Xget from '../pages/plugin/xget.vue'
 import FreeEye from '../pages/plugin/free-eye.vue'
 import WebDiagnostics from '../pages/plugin/web-diagnostics.vue'
-import P2p from '../pages/plugin/p2p.vue'
 import Proxy from '../pages/proxy'
 import Server from '../pages/server'
 import ServiceGroup from '../pages/service-group.vue'
@@ -31,8 +29,6 @@ const routes = [
   { path: '/plugin/xget', component: Xget },
   { path: '/plugin/free-eye', component: FreeEye },
   { path: '/plugin/web-diagnostics', component: WebDiagnostics },
-  { path: '/plugin/overwall', component: Overwall },
-  { path: '/plugin/p2p', component: P2p },
 ]
 
 export default routes

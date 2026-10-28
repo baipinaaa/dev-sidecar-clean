@@ -1,6 +1,6 @@
 packages:
-  # packages/core、packages/mitmproxy 为指向 vendor/ds-core/{core,mitmproxy} 的符号链接
-  # ds-core submodule 位于 vendor/ 下（不在 packages/ 内），无需额外排除规则
+  # 本定制版已将原 ds-core 子模块内联：packages/core、packages/mitmproxy 现在是真实目录
+  # （原来是指向 vendor/ds-core/{core,mitmproxy} 的符号链接，Windows 上会检出成普通文本，导致构建失败）
   - packages/*
   - '!**/test/**'
   # 构建辅助脚本（裸 import 的依赖声明在 _script/package.json，纳入 workspace 统一管理）

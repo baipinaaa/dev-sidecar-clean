@@ -5,7 +5,8 @@
 // 【临时方案】当前尚未实现运行时动态插件，本表在打包期固定。
 // 动态插件落地后应改为启动时读插件注册表，并废弃本文件。
 //
-// 扫描插件 6 个：开关 4 个、一键动作 1 个、其余不上托盘。
+// 扫描插件 2 个：开关 2 个、一键动作 1 个、其余不上托盘。
+// 【本版本定制】已移除 overwall（增强功能/梯子）与 share（P2P 节点分享）。
 
 /** checkbox 开关（statusOff=false） */
 export const TRAY_PLUGINS = [
@@ -19,18 +20,6 @@ export const TRAY_PLUGINS = [
     "key": "node",
     "name": "NPM加速",
     "needUnlock": false,
-    "restartServer": false
-  },
-  {
-    "key": "overwall",
-    "name": "增强功能",
-    "needUnlock": true,
-    "restartServer": true
-  },
-  {
-    "key": "share",
-    "name": "P2P节点分享",
-    "needUnlock": true,
     "restartServer": false
   }
 ]

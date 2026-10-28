@@ -1,0 +1,119 @@
+name: "Build (定制版 / Windows)"
+
+# 本定制版与上游 build-and-release.yml 的差别：
+#   1. 不再 checkout submodules —— 原 ds-core 的 core/ 与 mitmproxy/ 已内联进本仓库；
+#   2. 只构建 Windows（x64 / ia32 / arm64），不碰 Linux / macOS / flatpak / AUR；
+#   3. 不做 SignPath 代码签名（没有官方签名账号），产物为未签名 exe；
+#   4. 只上传 artifact，不自动发布 Release（需要发布时手动建 release 再下载 artifact）。
+#
+# 构建前请确认已完成的裁剪：
+#   - 百度统计（packages/gui/src/bridge/tongji）已删除
+#   - 远程配置改为手动（core/src/config-api.js 不再自动下载）
+#   - overwall / P2P 节点分享已移除
+#   - 远程 JS 注入已禁用（mitmproxy/src/lib/interceptor/impl/res/script.js）
+
+on:
+  # 【定制版】仅保留手动触发。
+  # 不自动构建：不响应 push / tag / PR，不配 schedule（无夜间构建）。
+  # 需要出包时到 Actions 页面点 "Run workflow"。
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    env:
+      ELECTRON_CACHE: ${{ github.workspace }}/.cache/electron
+      ELECTRON_BUILDER_CACHE: ${{ github.workspace }}/.cache/electron-builder
+      VUE_APP_PUBLISH_PROVIDER: generic
+      # GitHub Actions 自动注入 CI=true → electron-builder 会构建 x64 + ia32 + arm64 三套 NSIS 安装包
+      # （见 packages/gui/electron-builder.config.cjs 的 isCI 分支）
+
+    steps:
+      - name: "Checkout"
+        uses: actions/checkout@v5
+        with:
+          # 关键：不再拉子模块。core/ 与 mitmproxy/ 已在仓库内为真实目录。
+          submodules: false
+          fetch-depth: 0
+
+      - name: "Setup pnpm"
+        uses: pnpm/action-setup@v5
+        # 版本取自根 package.json 的 packageManager 字段（pnpm@12.14.0）
+
+      - name: "Setup Node.js"
+        uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: |
+            pnpm-lock.yaml
+            pnpm-workspace.yaml
+
+      - name: "Setup electron cache"
+        uses: actions/cache@v4
+        with:
+          path: ${{ github.workspace }}/.cache/electron
+          key: ${{ runner.os }}-electron-cache-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-electron-cache-
+
+      - name: "Setup electron-builder cache"
+        uses: actions/cache@v4
+        with:
+          path: ${{ github.workspace }}/.cache/electron-builder
+          key: ${{ runner.os }}-electron-builder-cache-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-electron-builder-cache-
+
+      - name: "Set C++17 compiler flags"
+        run: echo "CL=/std:c++17" >> $env:GITHUB_ENV
+
+      - name: "pnpm install"
+        shell: bash
+        run: |
+          echo "======================================================================";
+          echo "清理缓存恢复带来的旧 node_modules 布局，强制 pnpm 12 按 --node-linker hoisted 全新构建";
+          echo "--------------------";
+          rm -rf node_modules packages/gui/node_modules packages/core/node_modules packages/mitmproxy/node_modules _script/node_modules;
+          ls -lah;
+
+          echo "======================================================================";
+          echo "pnpm install --node-linker hoisted（pnpm 12 不认 workspace yaml 的 nodeLinker，用 CLI 参数强制 hoisted 实体布局）";
+          echo "--------------------";
+          pnpm install --node-linker hoisted;
+
+      - name: "读取版本号"
+        id: pkg
+        shell: pwsh
+        run: |
+          $json = Get-Content packages/gui/package.json -Raw | ConvertFrom-Json
+          "version=$($json.version)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          Write-Host "version = $($json.version)"
+
+      - name: "构建（npm run electron:build:ci）"
+        working-directory: packages/gui
+        env:
+          # 定制版：更新检查指向本仓库的 releases（不再是 dogfight/docmirror 官方地址）
+          VUE_APP_PUBLISH_URL: https://github.com/${{ github.repository }}/releases/download/v${{ steps.pkg.outputs.version }}
+        run: |
+          echo "======================================================================";
+          echo "npm run electron:build:ci";
+          echo "--------------------";
+          npm run electron:build:ci;
+
+      - name: "列出产物"
+        run: dir packages/gui/dist_electron
+
+      - name: "上传产物"
+        uses: actions/upload-artifact@v4
+        with:
+          name: DevSidecar-${{ steps.pkg.outputs.version }}-windows
+          path: |
+            packages/gui/dist_electron/*.exe
+            packages/gui/dist_electron/*.exe.blockmap
+            packages/gui/dist_electron/*.yml
+          if-no-files-found: error
+          retention-days: 30

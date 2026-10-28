@@ -146,10 +146,6 @@ const localApi = {
           setting = {}
         }
       }
-      if (setting.overwall == null) {
-        setting.overwall = false
-      }
-
       if (setting.installTime == null) {
         // 设置安装时间
         setting.installTime = dateUtil.now()
@@ -233,7 +229,7 @@ const localApi = {
      */
     list () {
       return serviceGroup.listCatalog(DevSidecar.api.config.get(), {
-        enhancedEnabled: localApi.setting.load().overwall === true,
+        enhancedEnabled: false,
       })
     },
     /**
@@ -247,7 +243,7 @@ const localApi = {
       const { ids, enabled } = options
       const config = lodash.cloneDeep(DevSidecar.api.config.get())
       const count = serviceGroup.applyEnabled(config, ids, enabled, {
-        enhancedEnabled: localApi.setting.load().overwall === true,
+        enhancedEnabled: false,
       })
       if (count > 0) {
         DevSidecar.api.config.save(config)
@@ -279,7 +275,7 @@ const localApi = {
       }
       const config = lodash.cloneDeep(DevSidecar.api.config.get())
       const count = serviceGroup.setPartValue(config, ids, section, value, {
-        enhancedEnabled: localApi.setting.load().overwall === true,
+        enhancedEnabled: false,
       })
       if (count === 0) {
         return { ok: false, error: '没有找到可修改的配置项' }
@@ -302,7 +298,7 @@ const localApi = {
       const { ids, sections } = options
       const config = lodash.cloneDeep(DevSidecar.api.config.get())
       const count = serviceGroup.resetParts(config, ids, sections, {
-        enhancedEnabled: localApi.setting.load().overwall === true,
+        enhancedEnabled: false,
       })
       if (count > 0) {
         DevSidecar.api.config.save(config)
@@ -405,14 +401,10 @@ function invoke (api, param) {
 }
 
 async function doStart () {
-  // 远程配置异步下载：有更新时自动 reload 并通知界面，不阻塞四个开关/代理启动
-  DevSidecar.api.config.startAutoDownloadRemoteConfig({
-    onUpdated: () => {
-      emitConfigChanged()
-    },
-  })
+  // 远程配置已改为「手动下载」：启动时不再自动拉取，也没有 24 小时轮询。
+  // 需要同步时请在「设置」页手动点击下载（走 DevSidecar.api.config.downloadRemoteConfig）。
   emitConfigChanged()
-  // 启动所有（首页开关无需等待配置下载）
+  // 启动所有（首页开关）
   localApi.startup()
 }
 

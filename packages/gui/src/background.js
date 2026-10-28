@@ -11,7 +11,6 @@ import backend from './bridge/backend.js'
 import jsonApi from '@blue-frontier/mitmproxy/src/json.js'
 import log from './utils/util.log.gui.js'
 import { TRAY_PLUGINS, TRAY_ACTIONS } from './generated/tray-plugins.js'
-import { VERSION_3_FEATURE_ENABLED } from './version-3-feature.js'
 import feedback from './bridge/feedback/backend.js'
 
 log.info(`background.js start, platform is ${process.platform}`)
@@ -134,25 +133,14 @@ function readUserSetting () {
 
 // 托盘可见插件：由 scripts/gen-tray-plugins.mjs 打包期扫描生成（见 src/generated/tray-plugins.js）
 // 【临时方案】尚未实现动态插件，表在打包期固定；动态插件落地后应改为运行时读插件注册表
-// needUnlock：仅在 setting.json 的 overwall 解锁后显示（与首页一致）
+// 【本版本定制】原 needUnlock 机制（setting.json 的 overwall 解锁）随 overwall / P2P 一并移除
 // restartServer：切换后若代理服务在运行则重启
 function getMitmproxyPath () {
   return path.join(__dirname, 'bridge', 'mitmproxy.js')
 }
 
-function isOverwallUnlocked () {
-  return readUserSetting().overwall === true
-}
-
 function getVisibleTrayPlugins () {
-  const unlocked = isOverwallUnlocked()
-  return TRAY_PLUGINS.filter((p) => {
-    // P2P 暂未发布，见 src/version-3-feature.js
-    if (p.key === 'share' && !VERSION_3_FEATURE_ENABLED) {
-      return false
-    }
-    return !p.needUnlock || unlocked
-  })
+  return TRAY_PLUGINS
 }
 
 /** 一键动作（如网络检测）：调用插件 run()，不改 enabled 勾选 */
@@ -211,23 +199,6 @@ async function toggleTraySwitch (key, checked) {
       const pluginConf = config.plugin && config.plugin[key]
       if (pluginConf) {
         pluginConf.enabled = checked
-        // 与首页模式选择同步：增强功能 = 增强模式
-        if (key === 'overwall') {
-          if (checked) {
-            config.app.mode = 'ow'
-            if (config.server) {
-              config.server.intercept.enabled = true
-            }
-          } else if (config.app?.mode === 'ow') {
-            config.app.mode = 'default'
-            if (config.server) {
-              config.server.intercept.enabled = true
-              if (config.server.dns?.speedTest) {
-                config.server.dns.speedTest.enabled = true
-              }
-            }
-          }
-        }
         await DevSidecar.api.config.save(config)
         const def = TRAY_PLUGINS.find(p => p.key === key)
         if (def?.restartServer && DevSidecar.api.status.get().server?.enabled) {
@@ -376,19 +347,8 @@ function setTray () {
   trayMenuCache = buildTrayMenu()
   syncTrayChecked()
 
-  // 仅在增强模式解锁变化时重建菜单结构（插件可见性变了）
-  let lastUnlocked = isOverwallUnlocked()
-  const ensureTrayMenuStructure = () => {
-    const unlocked = isOverwallUnlocked()
-    if (unlocked !== lastUnlocked) {
-      lastUnlocked = unlocked
-      trayMenuCache = buildTrayMenu()
-      syncTrayChecked()
-      if (isLinux) {
-        appTray.setContextMenu(trayMenuCache)
-      }
-    }
-  }
+  // 【本版本定制】插件可见性不再随 setting.json 的 overwall 解锁变化（该机制已移除），
+  // 菜单结构固定，无需运行时重建。
 
   // 设置托盘悬浮提示
   appTray.setToolTip('DevSidecar-开发者边车辅助工具')
@@ -400,7 +360,6 @@ function setTray () {
   // 状态变化：只同步勾选；结构变化（解锁）才重建
   try {
     DevSidecar.api.event.register('status', () => {
-      ensureTrayMenuStructure()
       syncTrayChecked()
     })
   } catch (e) {
@@ -413,7 +372,6 @@ function setTray () {
     appTray.setContextMenu(trayMenuCache)
   } else {
     appTray.on('right-click', () => {
-      ensureTrayMenuStructure()
       syncTrayChecked()
       setTimeout(() => {
         appTray.popUpContextMenu(trayMenuCache)

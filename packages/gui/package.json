@@ -14,7 +14,7 @@
   "scripts": {
     "gen:tray-plugins": "node scripts/gen-tray-plugins.mjs",
     "serve": "pnpm exec vue-cli-service serve",
-    "prebuild": "node scripts/gen-tray-plugins.mjs && node scripts/gen-kernel-info.mjs && node ../../_script/sync-official-config.mjs",
+    "prebuild": "node scripts/gen-tray-plugins.mjs && node scripts/gen-kernel-info.mjs",
     "build": "pnpm exec vue-cli-service build",
     "lint": "pnpm exec vue-cli-service lint",
     "preelectron": "node scripts/gen-tray-plugins.mjs && node scripts/gen-kernel-info.mjs",
@@ -39,7 +39,6 @@
     "ant-design-vue": "^4.2.6",
     "archiver": "^7.0.1",
     "core-js": "^3.51.0",
-    "electron-baidu-tongji": "^1.0.5",
     "electron-updater": "^6.8.9",
     "json5": "^2.2.3",
     "jsoneditor": "^10.4.3",

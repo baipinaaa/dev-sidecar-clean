@@ -3,7 +3,6 @@ import lodash from 'lodash'
 import { CheckOutlined, CloseOutlined, ArrowRightOutlined } from '@ant-design/icons-vue'
 import DsContainer from '../components/container'
 import SetupCa from '../components/setup-ca'
-import { VERSION_3_FEATURE_ENABLED } from '../../version-3-feature.js'
 
 export default {
   name: 'Index',
@@ -68,15 +67,6 @@ export default {
     await this.doCheckRootCa()
     await this.reloadConfig()
     this.status = this.$status
-    // setting.json 未开启 overwall 时，增强功能开关不显示，同时确保增强功能配置不生效
-    if (!this.setting.overwall && this.config?.plugin?.overwall?.enabled) {
-      this.config.plugin.overwall.enabled = false
-      const saveRet = await this.$api.config.save(lodash.cloneDeep(this.config))
-      this.config = saveRet.allConfig
-      if (this.status.server?.enabled) {
-        await this.$api.server.restart()
-      }
-    }
     this.switchBtns = this.createSwitchBtns()
     // 自动检查更新 延后到 mounted 中处理（等待代理服务启动后再执行）
     this.$api.info.get().then((ret) => {
@@ -105,27 +95,18 @@ export default {
     }
   },
   methods: {
-    /** 按模式写入拦截/测速/增强开关（首页模式与增强功能页共用） */
+    /** 按模式写入拦截/测速开关（首页模式选择，已移除「增强模式/ow」） */
     applyMode (mode) {
       if (mode === 'safe') {
         this.config.server.intercept.enabled = false
         this.config.server.dns.speedTest.enabled = true
-        this.config.plugin.overwall.enabled = false
       } else if (mode === 'default') {
         this.config.server.intercept.enabled = true
         this.config.server.dns.speedTest.enabled = true
-        this.config.plugin.overwall.enabled = false
-      } else if (mode === 'ow') {
-        this.config.server.intercept.enabled = true
-        this.config.plugin.overwall.enabled = true
       }
     },
     async modeChange (event) {
       const mode = this.config.app.mode
-      // 模式是增强功能的唯一入口：safe/default 关闭，ow 打开
-      if (mode === 'ow' && !this.setting.overwall) {
-        return
-      }
       console.log('modeChange', mode, event)
       this.applyMode(mode)
       const configCopy = lodash.cloneDeep(this.config)
@@ -133,12 +114,6 @@ export default {
       if (this.status.server && this.status.server.enabled) {
         return this.$api.server.restart()
       }
-    },
-    wantOW () {
-      this.$success({
-        title: '彩蛋（增强模式）',
-        content: '我把它藏在了源码里，感兴趣的话可以找一找它（线索提示 // TODO）',
-      })
     },
     async doCheckRootCa () {
       const setting = await this.$api.setting.load()
@@ -219,14 +194,6 @@ export default {
       btns.server = this.createSwitchBtn('server', '代理服务', this.$api.server, status)
       btns.proxy = this.createSwitchBtn('proxy', '系统代理', this.$api.proxy, status)
       lodash.forEach(status.plugin, (item, key) => {
-        // 增强功能由上方模式选择控制，这里不再放重复开关
-        if (key === 'overwall') {
-          return
-        }
-        // P2P 暂未发布，见 src/version-3-feature.js；setting.json 未开启 overwall 时同样不显示
-        if (key === 'share' && (!VERSION_3_FEATURE_ENABLED || !this.setting.overwall)) {
-          return
-        }
         if (this.config.plugin[key].statusOff) {
           return
         }
@@ -382,24 +349,14 @@ export default {
       </a-alert>
       <div v-if="config && config.app" class="mode-bar" style="margin:20px;">
         <a-radio-group v-model:value="config.app.mode" button-style="solid" @change="modeChange">
-          <a-tooltip placement="topLeft" title="启用测速，关闭拦截，关闭增强（不稳定，不需要安装证书，最安全）">
+          <a-tooltip placement="topLeft" title="启用测速，关闭拦截（不稳定，不需要安装证书，最安全）">
             <a-radio-button value="safe">
               安全模式
             </a-radio-button>
           </a-tooltip>
-          <a-tooltip placement="topLeft" title="启用测速，启用拦截，关闭增强（需要安装证书）">
+          <a-tooltip placement="topLeft" title="启用测速，启用拦截（需要安装证书）">
             <a-radio-button value="default">
               默认模式
-            </a-radio-button>
-          </a-tooltip>
-          <a-tooltip v-if="setting.overwall" placement="topLeft" title="一个简单的梯子（敏感原因，默认隐藏，更多信息请点击左侧增强功能菜单）">
-            <a-radio-button value="ow">
-              增强模式
-            </a-radio-button>
-          </a-tooltip>
-          <a-tooltip v-else placement="topLeft" title="这个页面有个彩蛋">
-            <a-radio-button :disabled="true" value="ow">
-              彩蛋
             </a-radio-button>
           </a-tooltip>
         </a-radio-group>
@@ -447,14 +404,6 @@ export default {
 
     <SetupCa title="安装证书" v-model:open="setupCa.visible" @setup="handleCaSetuped" />
     <template #footer>
-      <div v-if="!setting.overwall" class="star">
-        <div class="donate">
-          <a-tooltip placement="topLeft" title="彩蛋，点我">
-            <span style="display: block;width:100px;height:50px;" @click="wantOW()" />
-          </a-tooltip>
-        </div>
-        <div class="right" />
-      </div>
       <div v-if="setting.development == null || !setting.development" class="star">
         <div class="donate" />
         <div class="right">

@@ -23,12 +23,8 @@ permissions:
   security-events: write
 
 on:
-  push:
-    branches: [ "master" ]
-  pull_request:
-    branches: [ "master" ]
-  schedule:
-    - cron: '36 8 * * 1'
+  # 【定制版】仅手动触发：已去掉 push / pull_request 自动扫描与夜间 schedule（cron '36 8 * * 1'）。
+  workflow_dispatch:
 
 jobs:
   MSDO:
