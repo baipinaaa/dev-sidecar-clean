@@ -19,7 +19,13 @@ function replaceRequestHeaders (rOptions, headers, log) {
     }
   }
 
-  log.debug(`[DS-RequestReplace-Interceptor] 最终headers: \r\n${JSON.stringify(rOptions.headers, null, '\t')}`)
+  // 【本版本定制】原实现在 debug 级别下打印完整 headers（JSON.stringify 后引号会绕过
+  // util.redact 的 authorization 正则）。现改为默认只打印 header 名。
+  if (process.env.DEV_SIDECAR_LOG_DETAIL === 'true') {
+    log.debug(`[DS-RequestReplace-Interceptor] 最终headers: \r\n${JSON.stringify(rOptions.headers, null, '\t')}`)
+  } else {
+    log.debug(`[DS-RequestReplace-Interceptor] headers: ${Object.keys(rOptions.headers || {}).join(',')}`)
+  }
 }
 
 module.exports = {

@@ -5,6 +5,11 @@
 const SECRET_QUERY_KEYS = /([?&](?:token|password|passwd|pwd|secret|key|code|auth|signature|sig|access_token)=)[^&\s]+/gi
 const AUTH_HEADER = /((?:proxy-)?authorization\s*[:=]\s*)\S+/gi
 const PASSWORD_KV = /((?:dspassword|password|passwd|token|secret|privateKey|private_key)\s*[:=]\s*)\S+/gi
+// 【本版本定制】JSON 形式的敏感 headers：原正则要求 `authorization: xxx`，但
+// createRequestHandler / createConnectHandler 是把 headers 经 JSON.stringify2 序列化后
+// 再丢给日志的，形如 '"authorization":"Bearer xxx"'，引号阻断了上面的匹配，
+// 导致 Cookie / Authorization 明文落盘。这里补一条 JSON 专用的正则。
+const JSON_SECRET_KV = /("(?:cookie|set-cookie|authorization|proxy-authorization|x-api-key|api-key|x-auth-token|x-csrf-token|x-access-token|token|access_token|refresh_token|id_token|password|passwd|secret|session|sessionid|user_session|_gh_sess)"\s*:\s*")[^"]*/gi
 const DS_BLOB = /\b(ds-(?:p2p|card):\/\/)[A-Za-z0-9._-]+/g
 const MAX_TEXT = 8000
 const MAX_JSON = 2000
@@ -41,6 +46,7 @@ function redactText (text) {
   s = s.replace(/\b[A-Za-z0-9_-]{32,}\b/g, (m) => shortNodeId(m))
   s = s.replace(DS_BLOB, '$1***')
   s = s.replace(AUTH_HEADER, '$1***')
+  s = s.replace(JSON_SECRET_KV, '$1***')
   s = s.replace(SECRET_QUERY_KEYS, '$1***')
   s = s.replace(PASSWORD_KV, '$1***')
   s = s.replace(/\bhttps?:\/\/[^\s"'<>]+/gi, (m) => redactUrl(m))

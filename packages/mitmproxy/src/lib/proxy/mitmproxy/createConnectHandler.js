@@ -67,7 +67,12 @@ module.exports = function createConnectHandler (sslConnectInterceptor, middlewar
         trafficMonitor.markConnectError(hostname)
       })
     } else {
-      log.info(`不拦截请求，直连目标服务器: ${hostname}:${port}, headers:`, jsonApi.stringify2(req.headers))
+      // 【本版本定制】同上：默认不打印完整 headers，只打印 header 名
+      if (process.env.DEV_SIDECAR_LOG_DETAIL === 'true') {
+        log.info(`不拦截请求，直连目标服务器: ${hostname}:${port}, headers:`, jsonApi.stringify2(req.headers))
+      } else {
+        log.info(`不拦截请求，直连目标服务器: ${hostname}:${port}, headers:`, Object.keys(req.headers || {}).join(','))
+      }
       trafficMonitor.attachConnect(req, cltSocket)
       connect(req, cltSocket, head, hostname, port, dnsConfig, true)
     }

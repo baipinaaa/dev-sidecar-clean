@@ -300,7 +300,15 @@ module.exports = function createRequestHandler (createIntercepts, middlewares, e
           markActivity()
           url = `${rOptions.method} ➜ ${rOptions.protocol}//${rOptions.hostname}:${rOptions.port}${rOptions.path}`
           const start = Date.now()
-          log.info('发起代理请求:', url, (rOptions.servername ? `, sni: ${rOptions.servername}` : ''), ', headers:', jsonApi.stringify2(rOptions.headers))
+          // 【本版本定制】原实现无条件把完整 headers（含 Cookie / Authorization / 平台 token）
+          // 经 JSON.stringify2 后写进 ~/.dev-sidecar/logs/server.log。util.redact 的旧正则只认
+          // `authorization: xxx` 这种形式，碰到 JSON 序列化后的 '"authorization":"xxx"' 会失效。
+          // 现改为：默认只打印 header 名字，需要看具体值时显式设 DEV_SIDECAR_LOG_DETAIL=true。
+          if (process.env.DEV_SIDECAR_LOG_DETAIL === 'true') {
+            log.info('发起代理请求:', url, (rOptions.servername ? `, sni: ${rOptions.servername}` : ''), ', headers:', jsonApi.stringify2(rOptions.headers))
+          } else {
+            log.info('发起代理请求:', url, (rOptions.servername ? `, sni: ${rOptions.servername}` : ''), ', headers:', Object.keys(rOptions.headers || {}).join(','))
+          }
 
           const isDnsIntercept = {}
           let dnsHeaderLabel = null
