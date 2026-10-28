@@ -1,25 +1,45 @@
-name: "Build (定制版 / Windows)"
+name: "Build & Release (定制版 / Windows)"
 
 # 本定制版与上游 build-and-release.yml 的差别：
 #   1. 不再 checkout submodules —— 原 ds-core 的 core/ 与 mitmproxy/ 已内联进本仓库；
 #   2. 只构建 Windows（x64 / ia32 / arm64），不碰 Linux / macOS / flatpak / AUR；
 #   3. 不做 SignPath 代码签名（没有官方签名账号），产物为未签名 exe；
-#   4. 只上传 artifact，不自动发布 Release（需要发布时手动建 release 再下载 artifact）。
+#   4. 构建完成后自动发布 GitHub Release 并上传安装包。
 #
 # 构建前请确认已完成的裁剪：
 #   - 百度统计（packages/gui/src/bridge/tongji）已删除
 #   - 远程配置改为手动（core/src/config-api.js 不再自动下载）
 #   - overwall / P2P 节点分享已移除
 #   - 远程 JS 注入已禁用（mitmproxy/src/lib/interceptor/impl/res/script.js）
+#
+# ⚠ 发布 Release 需要写权限：
+#   仓库 Settings → Actions → General → Workflow permissions
+#   必须选 "Read and write permissions"，否则 GITHUB_TOKEN 建 release 会 403。
 
 on:
   # 【定制版】仅保留手动触发。
   # 不自动构建：不响应 push / tag / PR，不配 schedule（无夜间构建）。
   # 需要出包时到 Actions 页面点 "Run workflow"。
   workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release 标签（留空则自动使用 v<packages/gui 的 version>）"
+        required: false
+        default: ""
+        type: string
+      draft:
+        description: "发布为草稿（draft）"
+        required: false
+        default: false
+        type: boolean
+      prerelease:
+        description: "标记为预发布（pre-release）"
+        required: false
+        default: false
+        type: boolean
 
 permissions:
-  contents: read
+  contents: write   # 创建 / 更新 Release 与 Tag 需要
 
 jobs:
   build-windows:
@@ -93,21 +113,35 @@ jobs:
           "version=$($json.version)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           Write-Host "version = $($json.version)"
 
+      - name: "解析 Release 标签"
+        id: rel
+        shell: pwsh
+        run: |
+          $inputTag = "${{ inputs.tag }}".Trim()
+          if ([string]::IsNullOrWhiteSpace($inputTag)) {
+            $tag = "v${{ steps.pkg.outputs.version }}"
+          } else {
+            $tag = $inputTag
+          }
+          "tag=$tag" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          Write-Host "release tag = $tag"
+
       - name: "构建（npm run electron:build:ci）"
         working-directory: packages/gui
         env:
           # 定制版：更新检查指向本仓库的 releases（不再是 dogfight/docmirror 官方地址）
-          VUE_APP_PUBLISH_URL: https://github.com/${{ github.repository }}/releases/download/v${{ steps.pkg.outputs.version }}
+          VUE_APP_PUBLISH_URL: https://github.com/${{ github.repository }}/releases/download/${{ steps.rel.outputs.tag }}
         run: |
           echo "======================================================================";
-          echo "npm run electron:build:ci";
+          echo "npm run electron:build:ci -- --publish never";
+          echo "（--publish never：禁止 electron-builder 自己发 Release，发布统一交给后面的 action-gh-release）";
           echo "--------------------";
-          npm run electron:build:ci;
+          npm run electron:build:ci -- --publish never;
 
       - name: "列出产物"
         run: dir packages/gui/dist_electron
 
-      - name: "上传产物"
+      - name: "上传产物（artifact，便于调试下载）"
         uses: actions/upload-artifact@v4
         with:
           name: DevSidecar-${{ steps.pkg.outputs.version }}-windows
@@ -117,3 +151,20 @@ jobs:
             packages/gui/dist_electron/*.yml
           if-no-files-found: error
           retention-days: 30
+
+      - name: "发布 Release"
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.rel.outputs.tag }}
+          name: ${{ steps.rel.outputs.tag }}
+          # 同 tag 再次运行会覆盖同名资产（updater 增量包 / 安装包都会更新）
+          draft: ${{ inputs.draft }}
+          prerelease: ${{ inputs.prerelease }}
+          generate_release_notes: true
+          fail_on_unmatched_files: false
+          files: |
+            packages/gui/dist_electron/*.exe
+            packages/gui/dist_electron/*.exe.blockmap
+            packages/gui/dist_electron/*.yml
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
