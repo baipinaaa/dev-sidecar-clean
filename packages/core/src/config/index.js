@@ -1360,7 +1360,9 @@ Object.assign(defaultConfig.server, {
       '172.64.145.151': true,
     },
     'clientconfig.akamai.steamstatic.com': {
-      ' 23.208.12.191': true,
+      // 【本版定制】原为 ' 23.208.12.191'（带前导空格），net.isIP 判不通过，
+      // 永远连接失败，等于少了一个候选 IP。
+      '23.208.12.191': true,
       '23.32.91.19': true,
       '2.16.168.104': true,
       '2.16.168.109': true,
@@ -1555,7 +1557,9 @@ Object.assign(defaultConfig.server, {
       // 加进 dns.mapping 让它走加密 DoT，ECH 才有可能真正生效。
       '*linux.do': 'cf-DoT',
       // 【本版定制】steamcommunity.com 主站同样被污染（128.121.243.77）。
-      // 它的 preSetIpList 只有 3 个写死的 Akamai IP，任何域名变体都可能绕过，这里兑一份 DNS 保障。
+      // 注意：`_lookupWithPreSetIpList()` 优先于 dns.mapping，而 `*.steamcommunity.com`
+      // 已有 preSetIpList，所以正常路径不会走到这里。此条仅在预设 IP 全部失败、
+      // 回退到「用系统 DNS 解析域名」时充当兜底。
       '*steamcommunity.com': 'cf-DoT',
       'mega.io': 'cf-DoT',
       '*.mega.io': 'cf-DoT',
