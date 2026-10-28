@@ -176,8 +176,12 @@ const defaultConfig = {
 /* eslint-disable no-template-curly-in-string -- 官方配置里存在 ${...} 形式的普通字符串（如代理目标），并非模板串 */
 Object.assign(defaultConfig, {
   proxy: {
-    excludeDomesticDomainAllowList: false,
-    remoteDomesticDomainAllowListFileUrl: 'https://ghproxy.net/https://raw.githubusercontent.com/pluwen/china-domain-allowlist/main/allow-list.sorl',
+    // 【本版定制】官方配置默认 false（不排除国内域名），导致所有国内网站都要绕道
+    // 127.0.0.1:31181 做 MITM 转发，极卡。改为 true，让国内域名直连。
+    excludeDomesticDomainAllowList: true,
+    // 【本版定制】官方配置把白名单源指向第三方代理 ghproxy.net，改为 GitHub 原始地址，
+    // 避免启动时向第三方发送请求。
+    remoteDomesticDomainAllowListFileUrl: 'https://raw.githubusercontent.com/pluwen/china-domain-allowlist/refs/heads/main/allow-list.sorl',
     excludeIpList: {
       'objects-origin.githubusercontent.com': true,
       '*.ghproxy.net': true,
@@ -1541,6 +1545,13 @@ Object.assign(defaultConfig.server, {
       '*blockbench.net': 'cf-DoT',
       '*gamespot.com': 'cf-DoT',
       '*steamdb.info': 'cf-DoT',
+      // 【本版定制】linux.do 在国内被 DNS 污染（nslookup 返回 Twitter 的 199.59.149.203 /
+      // Facebook 的 2a03:2880:: 段），而它只在 ech.domains 里，A 记录仍然走本地 DNS。
+      // 加进 dns.mapping 让它走加密 DoT，ECH 才有可能真正生效。
+      '*linux.do': 'cf-DoT',
+      // 【本版定制】steamcommunity.com 主站同样被污染（128.121.243.77）。
+      // 它的 preSetIpList 只有 3 个写死的 Akamai IP，任何域名变体都可能绕过，这里兑一份 DNS 保障。
+      '*steamcommunity.com': 'cf-DoT',
       'mega.io': 'cf-DoT',
       '*.mega.io': 'cf-DoT',
       'mega.nz': 'cf-DoT',
