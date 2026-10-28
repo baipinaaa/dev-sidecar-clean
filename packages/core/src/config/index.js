@@ -1055,12 +1055,13 @@ Object.assign(defaultConfig.server, {
     // 处理方式沿用 DS 对 *.instagram.com / *startpage.com 的既有做法：SNI 伪装
     // 说明：SNI 伪装只解决「TLS 握手 SNI 被阻断」；若目标 IP 层被封，仍需优选 IP 或中转
     // 关闭单项：在 ~/.dev-sidecar/config.json 里把该键设为 null 即可
+    //
+    // ⚠ 重要：Cloudflare 托管的目标**不能**用 sni 伪装。CF 按 SNI 选择 zone 与证书，
+    //   SNI=baidu.com 而 Host=目标域名时 CF 一律返回 403 Forbidden（实测与 registry.npmjs.org /
+    //   discord.com 均如此，且不会有任何回退重试）。这类域名只能靠 ECH，见 server.dns.ech.domains。
 
     // ---- 社交 / 娱乐 ----
-    '*discord.com': { '.*': { sni: 'baidu.com' } },
-    '*discord.gg': { '.*': { sni: 'baidu.com' } },
-    '*discordapp.com': { '.*': { sni: 'baidu.com' } },
-    '*discordapp.net': { '.*': { sni: 'baidu.com' } },
+    // Discord 全家桶托管在 Cloudflare，不做 sni（CF 会 403），改由 ech.domains 走 ECH
     '*twitch.tv': { '.*': { sni: 'baidu.com' } },
     '*ttvnw.net': { '.*': { sni: 'baidu.com' } },
     '*jtvnw.net': { '.*': { sni: 'baidu.com' } },
@@ -1086,21 +1087,16 @@ Object.assign(defaultConfig.server, {
     '*minecraft.net': { '.*': { sni: 'baidu.com' } },
     '*mojang.com': { '.*': { sni: 'baidu.com' } },
     '*minecraftservices.com': { '.*': { sni: 'baidu.com' } },
-    '*nexusmods.com': { '.*': { sni: 'baidu.com' } },
+    // nexusmods / modcdn / parsec / battlemetrics / blockbench / steamdb 托管在 Cloudflare，
+    // 不做 sni（CF 会 403），改由 ech.domains 走 ECH
     '*nexus-cdn.com': { '.*': { sni: 'baidu.com' } },
     'mod.io': { '.*': { sni: 'baidu.com' } },
     '*.mod.io': { '.*': { sni: 'baidu.com' } },
-    '*modcdn.io': { '.*': { sni: 'baidu.com' } },
     'itch.io': { '.*': { sni: 'baidu.com' } },
     '*.itch.io': { '.*': { sni: 'baidu.com' } },
-    '*parsec.app': { '.*': { sni: 'baidu.com' } },
-    '*parsecusercontent.com': { '.*': { sni: 'baidu.com' } },
-    '*battlemetrics.com': { '.*': { sni: 'baidu.com' } },
     '*hsguru.com': { '.*': { sni: 'baidu.com' } },
     '*opencritic.com': { '.*': { sni: 'baidu.com' } },
-    '*blockbench.net': { '.*': { sni: 'baidu.com' } },
     '*gamespot.com': { '.*': { sni: 'baidu.com' } },
-    '*steamdb.info': { '.*': { sni: 'baidu.com' } },
 
     // ---- Steam（原版只覆盖 store/checkout/community/.steamstatic.com，以下为缺口）----
     'api.steampowered.com': { '.*': { sni: 'baidu.com', responseReplace: { headers: { 'alt-svc': '[remove]' } } } },
@@ -1141,13 +1137,12 @@ Object.assign(defaultConfig.server, {
     '*xdaforums.com': { '.*': { sni: 'baidu.com' } },
     'hf.co': { '.*': { sni: 'baidu.com' } },
     '*.hf.co': { '.*': { sni: 'baidu.com' } },
-    '*unpkg.com': { '.*': { sni: 'baidu.com' } },
+    // unpkg / cloudflarestorage 托管在 Cloudflare，不做 sni，改由 ech.domains 走 ECH
     '*docker.io': { '.*': { sni: 'baidu.com' } },
-    '*cloudflarestorage.com': { '.*': { sni: 'baidu.com' } },
     'support-assets.githubassets.com': { '.*': { sni: 'baidu.com' } },
 
     // ---- 人机验证 ----
-    '*hcaptcha.com': { '.*': { sni: 'baidu.com' } },
+    // hcaptcha 托管在 Cloudflare，不做 sni，改由 ech.domains 走 ECH
     '*arkoselabs.com': { '.*': { sni: 'baidu.com' } },
     '*recaptcha.net': { '.*': { sni: 'baidu.com' } },
   },
@@ -1473,6 +1468,13 @@ Object.assign(defaultConfig.server, {
         server: 'https://cloudflare-dns.com/dns-query',
         sni: 'baidu.com',
       },
+      // 【定制版新增】注意：cf-DoH 实际不可用。cloudflare-dns.com 本身由 Cloudflare 托管，
+      // CF 按 SNI 选择 zone，SNI=baidu.com 而 Host=cloudflare-dns.com 时一律返回 403（已实测）。
+      // 改用非 CF 托管的 OpenDNS；它同样接受 wire format，且能返回未被污染的 A 记录。
+      'opendns': {
+        server: 'https://doh.opendns.com/dns-query',
+        cacheSize: 1024,
+      },
       'quad9-ip': {
         server: 'https://9.9.9.9/dns-query',
       },
@@ -1642,6 +1644,21 @@ Object.assign(defaultConfig.server, {
         'civitai.com',
         '*linux.do',
         'greasyfork.org',
+        // ---- 【定制版新增】Cloudflare 托管 + SNI 被封：只能走 ECH，sni 伪装会被 CF 403 ----
+        '*discord.com',
+        '*discord.gg',
+        '*discordapp.com',
+        '*discordapp.net',
+        '*nexusmods.com',
+        '*modcdn.io',
+        '*parsec.app',
+        '*parsecusercontent.com',
+        '*battlemetrics.com',
+        '*blockbench.net',
+        '*steamdb.info',
+        '*unpkg.com',
+        '*cloudflarestorage.com',
+        '*hcaptcha.com',
       ],
       preSetIpDomains: [
         '*ldstatic.com',
@@ -1650,7 +1667,7 @@ Object.assign(defaultConfig.server, {
         '*twimg.com',
         '^(.+.)?x.com$',
       ],
-      dns: 'cf-DoH',
+      dns: 'opendns',
       enabled: true,
       use: true,
       publicName: 'cloudflare-ech.com',
@@ -1667,7 +1684,7 @@ Object.assign(defaultConfig.server, {
       domains: [
         '*chatgpt.com',
       ],
-      dns: 'cf-DoH',
+      dns: 'opendns',
     },
   },
 })
