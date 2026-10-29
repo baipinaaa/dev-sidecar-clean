@@ -1555,13 +1555,18 @@ Object.assign(defaultConfig.server, {
       '*steamdb.info': 'cf-DoT',
       // 【本版定制】linux.do 在国内被 DNS 污染（nslookup 返回 Twitter 的 199.59.149.203 /
       // Facebook 的 2a03:2880:: 段），而它只在 ech.domains 里，A 记录仍然走本地 DNS。
-      // 加进 dns.mapping 让它走加密 DoH，ECH 才有可能真正生效。
-      // 注意不能走 cf-DoT：tls://1.1.1.1 在当前网络 IP 级被封（实测 80/443/853 全部 timeout）。
-      '*linux.do': 'cf-DoH',
+      // 实测（2026-10-29）：
+      //   bebasid DoT   → 104.20.16.234 / 172.66.166.61  ← 正确，且这两个 IP 实测 TCP 443 分别 177/183ms 可通
+      //   aliyun UDP    → 199.96.62.41                   ← 污染
+      //   cf-DoH        → SNI=baidu.com 返回 403（CF 要求 SNI 与 Host 一致），真名 SNI 被 RST
+      //   cf-DoT        → tls://1.1.1.1 在当前网络 IP 级被封（实测 80/443/853 全部 timeout）
+      '*linux.do': 'bebasid',
       // 【本版定制】pixiv.net 不在 Cloudflare 上（下发的 HTTPS 记录里没有 ECH 参数），
-      // 放进 ech.domains 只会把它的 A 查询误导向 ECH 专用 DNS。这里改为直接指定 DoH：
-      // 国内 DNS（阿里/腾讯/360）对 pixiv.net 全部返回污染结果（31.13.x / 185.45.6.103 等）。
-      '*pixiv.net': 'cf-DoH',
+      // 放进 ech.domains 只会把它的 A 查询误导向 ECH 专用 DNS。这里改为直接指定 DNS：
+      // 实测（2026-10-29）阿里 / 腾讯 / 360 对 pixiv.net 全部返回污染结果
+      // （31.13.x / 74.86.3.208 / 185.45.6.103 / 108.160.172.232），
+      // 而 bebasid DoT 返回真实段 210.140.139.152~161。
+      '*pixiv.net': 'bebasid',
       // 【本版定制】steamcommunity.com 主站同样被污染（128.121.243.77）。
       // 注意：`_lookupWithPreSetIpList()` 优先于 dns.mapping，而 `*.steamcommunity.com`
       // 已有 preSetIpList，所以正常路径不会走到这里。此条仅在预设 IP 全部失败、
