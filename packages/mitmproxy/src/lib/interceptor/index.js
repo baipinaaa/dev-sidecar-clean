@@ -11,6 +11,8 @@ const proxy = require('./impl/req/proxy')
 const retry = require('./impl/req/retry')
 const sni = require('./impl/req/sni')
 const unVerifySsl = require('./impl/req/unVerifySsl')
+// 【定制版】TLS 指纹伪装（wreq-js / Rust + BoringSSL），增量方案，默认零影响
+const fingerprint = require('./impl/req/fingerprint')
 
 const baiduOcr = require('./impl/req/baiduOcr')
 
@@ -33,6 +35,7 @@ module.exports = [
   retry,
   sni,
   unVerifySsl,
+  fingerprint,
   baiduOcr,
 
   // response interceptor impls

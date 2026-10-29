@@ -14,6 +14,8 @@ const compatible = require('../compatible/compatible')
 const echUtil = require('../common/ech')
 const InsertScriptMiddleware = require('../middleware/InsertScriptMiddleware')
 const dnsLookup = require('./dnsLookup')
+// 【定制版】TLS 指纹伪装（增量方案）：仅在规则显式配置 fingerprint 时才会被用到
+const { fingerprintRequest } = require('./fingerprintRequest')
 
 const MAX_SLOW_TIME = 8000 // 超过此时间 则认为太慢了
 const CONNECT_TIMEOUT_MS = 7000 // 上游建连（含 TLS 握手）超时：SNI 伪装 + 跨境线路下握手可能偏慢，5s 会误杀可用 IP
@@ -282,6 +284,14 @@ module.exports = function createRequestHandler (createIntercepts, middlewares, e
             throw e
           }
         }
+      }
+
+      // 【定制版】TLS 指纹伪装：命中 fingerprint 规则时，整条上游请求改由 wreq-js（Rust + BoringSSL）
+      // 发起，使 ClientHello 指纹与真实浏览器一致。未配置 fingerprint 的域名完全不受影响。
+      if (context.fingerprint) {
+        const fp = await fingerprintRequest(context, req, res)
+        proxyReq = fp.proxyReq
+        return fp.proxyRes
       }
 
       return new Promise((resolve, reject) => {

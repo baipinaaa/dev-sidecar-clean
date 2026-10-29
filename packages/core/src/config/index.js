@@ -1145,6 +1145,29 @@ Object.assign(defaultConfig.server, {
     // hcaptcha 托管在 Cloudflare，不做 sni，改由 ech.domains 走 ECH
     '*arkoselabs.com': { '.*': { sni: 'baidu.com' } },
     '*recaptcha.net': { '.*': { sni: 'baidu.com' } },
+
+    // ---- TLS 指纹伪装（TLS Fingerprint Impersonation）----
+    // 【定制版新增】用 wreq-js（Rust + BoringSSL）把上游 ClientHello 指纹伪装成真实浏览器，
+    // 绕过按 JA3/JA4 指纹判定并 RST 的站点。默认**未启用任何域名**。
+    //
+    // 启用方式（取消注释并改成自己需要的域名）：
+    //   'example.com': { '.*': { fingerprint: 'chrome_149' } },
+    //
+    // 可选字段：
+    //   fingerprint         —— 浏览器档位，共 133 个：chrome_100~chrome_149、firefox_*、safari_*、
+    //                          edge_*、opera_*、okhttp_* 等。完整列表见接口 GET /wreq-profiles 或
+    //                          require('wreq-js').getProfiles()
+    //   fingerprintOs       —— 伪装的操作系统：windows / macos / linux / android / ios（不填跟随档位）
+    //   fingerprintTimeout  —— 上游超时毫秒数，默认 30000
+    //
+    // 使用前提（重要）：
+    //   1. 本拦截器会接管整个请求，与 sni / unVerifySsl / ech / proxy 互斥（只有 fingerprint 生效）；
+    //   2. 它只能解决「TCP 通、TLS 握手被按指纹 RST」的情形；对 IP 层被封、或需要 SNI 伪装的站点无效；
+    //   3. 仍会先走 dev-sidecar 自己的 DNS（doH / preSetIpList），解析结果通过 wreq 的 resolve 透传，
+    //      不会退回被污染的系统 DNS。
+    //
+    // 配置示例（pixiv 这类「IP 不通」的站点加了也没用，请先用 fingerprint 测 TCP 是否可达）：
+    //   'pixiv.net': { '.*': { fingerprint: 'chrome_149', fingerprintTimeout: 20000 } },
   },
   preSetIpList: {
     'github.com': {

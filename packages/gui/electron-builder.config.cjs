@@ -22,6 +22,9 @@ module.exports = {
   asarUnpack: [
     'src/bridge/mitmproxy.js',
     'dist/icon.png',
+    // 【定制版】wreq-js 的 Rust native binding（.node）必须留真实文件，不能在 asar 里
+    '**/node_modules/wreq-js/**',
+    '**/node_modules/@wreq-js/**',
   ],
   files: [
     {
