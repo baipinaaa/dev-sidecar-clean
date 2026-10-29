@@ -926,6 +926,11 @@ Object.assign(defaultConfig.server, {
       },
     },
     '*steamcommunity.com': {
+      '.*\.(jpg|jpeg|png|gif|webp|svg|ico|css|js|woff2?|ttf|eot)(\?.*)?$': {
+        sni: 'baidu.com',
+        cacheDays: 30,
+        responseReplace: { headers: { 'alt-svc': '[remove]' } },
+      },
       '^(?!/discussions|/Profile|/app.*/discussions).*$': {
         sni: 'baidu.com',
         // 【本版定制】抹除 Alt-Svc，阻止浏览器发现 HTTP/3。DS 是 HTTP 代理，
@@ -935,10 +940,17 @@ Object.assign(defaultConfig.server, {
       },
     },
     '^(?!.*cloudflare).*steamstatic.com$': {
+      // 【本版定制】Steam 静态资源缓存。原版这里没有任何缓存，
+      // 使得每次刷新页面都要回源拉一遍相同的头像/封面/JS/CSS（Steam 资源地址
+      // 都带 hash 或时间戳，同 URL 内容不会变），白白多付一次 MITM + 回源 RTT。
+      '.*\.(jpg|jpeg|png|gif|webp|svg|ico|css|js|woff2?|ttf|eot)(\?.*)?$': {
+        sni: 'baidu.com',
+        cacheDays: 30,
+        responseReplace: { headers: { 'alt-svc': '[remove]' } },
+      },
       '.*': {
         sni: 'baidu.com',
         responseReplace: { headers: { 'alt-svc': '[remove]' } },
-        desc: 'steam社区数据不能也不需调整sni,直接直连',
       },
     },
     '^(store|checkout).steampowered.com$': {
@@ -1116,13 +1128,22 @@ Object.assign(defaultConfig.server, {
     '*gamespot.com': { '.*': { sni: 'baidu.com' } },
 
     // ---- Steam（原版只覆盖 store/checkout/community/.steamstatic.com，以下为缺口）----
-    'api.steampowered.com': { '.*': { sni: 'baidu.com', responseReplace: { headers: { 'alt-svc': '[remove]' } } } },
-    'login.steampowered.com': { '.*': { sni: 'baidu.com', responseReplace: { headers: { 'alt-svc': '[remove]' } } } },
-    'help.steampowered.com': { '.*': { sni: 'baidu.com', responseReplace: { headers: { 'alt-svc': '[remove]' } } } },
+    // 【实测修正】这三个域名的 SNI 从未被墙，伪装成 baidu.com 反而直接不通：
+    //   api.steampowered.com   + sni:'baidu.com' → ERR_SSL_TLSV1_ALERT_INTERNAL_ERROR
+    //   login.steampowered.com + sni:'baidu.com' → 同上（Steam 登录直接失败）
+    // 真实 SNI @ 23.201.103.x 实测：api total=127ms、login 302/301ms，TCP 仅 25~28ms。
+    // 保留拦截器只为抹除 Alt-Svc（阻断 HTTP/3），上游一律用真实 SNI。
+    'api.steampowered.com': { '.*': { responseReplace: { headers: { 'alt-svc': '[remove]' } } } },
+    'login.steampowered.com': { '.*': { responseReplace: { headers: { 'alt-svc': '[remove]' } } } },
+    'help.steampowered.com': { '.*': { responseReplace: { headers: { 'alt-svc': '[remove]' } } } },
     '*steam-chat.com': { '.*': { sni: 'baidu.com', responseReplace: { headers: { 'alt-svc': '[remove]' } } } },
     '*cloudflare.steamstatic.com': { '.*': { sni: 'baidu.com', responseReplace: { headers: { 'alt-svc': '[remove]' } } } },
     '*steamusercontent.com': { '.*': { sni: 'baidu.com', responseReplace: { headers: { 'alt-svc': '[remove]' } } } },
-    '*st.dl.eccdnx.com': { '.*': { sni: 'baidu.com', responseReplace: { headers: { 'alt-svc': '[remove]' } } } },
+    // 【实测修正】eccdnx 是 Steam 的国内 CDN（白山→阿里），实测：
+    //   真实 SNI @ media.st.dl.eccdnx.com → 2/2 通 382ms
+    //   伪装 baidu.com                      → ERR_SSL_SSL/TLS_ALERT_HANDSHAKE_FAILURE
+    // 它本来就不被墙，伪装只会让服务器認不得 SNI。
+    '*st.dl.eccdnx.com': { '.*': { responseReplace: { headers: { 'alt-svc': '[remove]' } } } },
     '*queniujq.cn': { '.*': { sni: 'baidu.com', responseReplace: { headers: { 'alt-svc': '[remove]' } } } },
     'replay.csgo.com.cn': { '.*': { sni: 'baidu.com', responseReplace: { headers: { 'alt-svc': '[remove]' } } } },
     'steamstore-a.akamaihd.net': { '.*': { sni: 'baidu.com', responseReplace: { headers: { 'alt-svc': '[remove]' } } } },
@@ -1417,9 +1438,11 @@ Object.assign(defaultConfig.server, {
       '23.221.227.5': true,
     },
     '*.steamcommunity.com': {
+      // 104.79.200.218 实测 tcp=252ms / tls=734ms / total=1244ms，比前两个慢 3 倍以上，
+      // 留着它只会在前两个 IP 失败时把请求拖入超时。
       '23.209.217.19': true,
       '23.15.140.216': true,
-      '104.79.200.218': true,
+      '104.79.200.218': false,
     },
     '^(store|checkout).steampowered.com$': {
       '23.209.218.108': true,
@@ -1428,6 +1451,78 @@ Object.assign(defaultConfig.server, {
       '104.83.198.104': true,
       '23.51.62.114': true,
       '23.55.98.103': true,
+    },
+    // ---- 【实测新增】Steam 全站真实 IP 优选 ----
+    // 本机实测：Akamai 的 Steam 边缘节点 TCP 仅 20~35ms（国内直连量级），
+    // 而原来靠 DNS 解析会被污染到 184.24.154.x（整段 TCP 不通）。
+    // 这些 IP 配合真实 SNI 可用；改 sni:'baidu.com' 会落到 a248.e.akamai.net
+    // 兑现节点或直接 TLS 报错，因此上面 intercepts 已去掉这些域名的 sni。
+    'api.steampowered.com': {
+      '23.201.103.36': true,
+      '23.201.103.52': true,
+      '23.35.148.163': true,
+      '23.35.148.167': true,
+    },
+    'login.steampowered.com': {
+      '23.201.103.12': true,
+      '23.35.148.164': true,
+    },
+    'help.steampowered.com': {
+      '23.51.128.101': true,
+    },
+    'cdn.akamai.steamstatic.com': {
+      '23.49.104.214': true,
+      '23.49.104.198': true,
+    },
+    'store.akamai.steamstatic.com': {
+      '23.49.104.199': true,
+      '23.49.104.204': true,
+    },
+    'shared.akamai.steamstatic.com': {
+      '23.49.104.212': true,
+      '23.49.104.214': true,
+    },
+    'cdn.cloudflare.steamstatic.com': {
+      '23.210.7.168': true,
+      '23.210.7.177': true,
+      '23.210.7.179': true,
+    },
+    'steamstore-a.akamaihd.net': {
+      '23.49.104.199': true,
+      '23.49.104.204': true,
+    },
+    'steamcommunity-a.akamaihd.net': {
+      '23.49.104.206': true,
+      '23.49.104.207': true,
+    },
+    'steamcdn-a.akamaihd.net': {
+      '23.203.133.147': true,
+    },
+    'steamuserimages-a.akamaihd.net': {
+      '23.49.104.196': true,
+      '23.49.104.199': true,
+    },
+    'steamvideo-a.akamaihd.net': {
+      '23.49.104.41': true,
+    },
+    'steamusercontent-a.akamaihd.net': {
+      '23.49.104.197': true,
+      '23.49.104.210': true,
+    },
+    'steambroadcast.akamaized.net': {
+      '23.217.136.140': true,
+      '23.217.136.142': true,
+    },
+    'steambroadcastchat.akamaized.net': {
+      '23.49.104.196': true,
+      '23.49.104.214': true,
+    },
+    'images.steamusercontent.com': {
+      '23.49.104.198': true,
+      '23.49.104.201': true,
+    },
+    'steam-chat.com': {
+      '23.35.100.199': true,
     },
     '^(.+\\.)?x\\.com$': {
       '172.67.172.22': true,
