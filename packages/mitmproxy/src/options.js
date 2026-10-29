@@ -121,6 +121,9 @@ module.exports = (serverConfig) => {
     host: serverConfig.host,
     port: serverConfig.port,
     maxLength: serverConfig.fakeServerMaxLength,
+    // 【本版本定制】TLS ClientHello 分段发送（绕过按 SNI 的 DPI 封锁），
+    // 仅在 CONNECT 纯隧道场景生效，配置见 server.tlsFragment
+    tlsFragment: serverConfig.tlsFragment,
     dnsConfig: {
       preSetIpList,
       dnsMap: dnsUtil.initDNS(serverConfig.dns.providers, preSetIpList, {

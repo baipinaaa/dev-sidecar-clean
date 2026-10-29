@@ -9,6 +9,11 @@ const DNSOverTLS = require('./tls.js')
 const DNSOverTCP = require('./tcp.js')
 const DNSOverUDP = require('./udp.js')
 
+// 【定制版】共享 ECH 配置的默认域名。
+// Cloudflare 对旗下所有站点下发同一份 ECH 配置，边缘节点解密后按内层 SNI 路由，
+// 所以站点自身没下发 ECH 记录时，用它就能让 ECH 生效。
+const DEFAULT_ECH_PUBLIC_NAME = 'cloudflare-ech.com'
+
 module.exports = {
   /**
    * @param dnsProviders DNS服务列表
@@ -311,8 +316,19 @@ module.exports = {
     }
 
     const publicName = dnsConfig.ech.publicName
-    if (publicName == null || publicName === '' || publicName === hostname) {
+    if (publicName === hostname) {
       return null
+    }
+
+    // 【定制版加固】`publicName` 为空/未设置时回退到内置默认值。
+    // 原实现直接 return null，等于静默关掉「共享 ECH 配置」兜底：
+    // 用户一旦在设置里把该字段清空，ECH 就彻底不再工作，日志里也没有任何提示。
+    if (publicName == null || publicName === '') {
+      if (dnsConfig.ech.useSharedConfig === false) {
+        return null
+      }
+      log.debug(`[ECH] ${hostname} 未配置共享ECH配置域名，使用内置默认值: ${DEFAULT_ECH_PUBLIC_NAME}`)
+      return await this.lookupDomainEch(dnsConfig, DEFAULT_ECH_PUBLIC_NAME)
     }
 
     const shared = await this.lookupDomainEch(dnsConfig, publicName)
@@ -333,13 +349,14 @@ module.exports = {
    * @returns {Promise<null|object>} 形如 `{ echConfigList, publicName, config, ttl, dnsName, dnsType }`
    */
   async lookupDomainEch (dnsConfig, hostname) {
-    const candidates = []
+    const primary = []
+    const fallback = []
 
     // 0. ECH专用DNS：优先查询（放在首位，由下面的并发竞赛逻辑保证它先发出）
     const echDns = this.getEchDNS(dnsConfig)
     if (echDns != null) {
       if (echDns.echEnabled) {
-        candidates.push(echDns)
+        primary.push(echDns)
       } else {
         log.warn(`[ECH] ECH专用DNS '${echDns.dnsName}' 未启用ECH查询，将回退到域名映射的DNS: ${hostname}`)
       }
@@ -348,33 +365,15 @@ module.exports = {
     // 1. 该域名映射到的DNS
     const dnsData = this.getDNSAndFamily(dnsConfig, hostname)
     if (dnsData != null && dnsData.dns != null) {
-      candidates.push(dnsData.dns)
+      primary.push(dnsData.dns)
     }
 
-    if (dnsConfig.ech.tryAllProviders !== false) {
-      // 2. 默认用于SNI的DNS
-      if (dnsConfig.dnsMap.ForSNI != null) {
-        candidates.push(dnsConfig.dnsMap.ForSNI)
-      }
-
-      // 3. 其它DNS
-      for (const dnsName of Object.keys(dnsConfig.dnsMap)) {
-        candidates.push(dnsConfig.dnsMap[dnsName])
-      }
+    // 2. 默认用于SNI的DNS / 3. 其它DNS（作为备选）
+    if (dnsConfig.dnsMap.ForSNI != null) {
+      fallback.push(dnsConfig.dnsMap.ForSNI)
     }
-
-    const dnsList = []
-    const tried = new Set()
-    for (const dns of candidates) {
-      if (dns == null || tried.has(dns) || !dns.echEnabled) {
-        continue
-      }
-      tried.add(dns)
-      dnsList.push(dns)
-    }
-
-    if (dnsList.length === 0) {
-      return null
+    for (const dnsName of Object.keys(dnsConfig.dnsMap)) {
+      fallback.push(dnsConfig.dnsMap[dnsName])
     }
 
     // 并发查询：映射的DNS优先查询，其余DNS延迟一小段时间后并发查询，取最先返回的结果。
@@ -382,8 +381,54 @@ module.exports = {
     const parallelDelay = Number.parseInt(dnsConfig.ech.parallelDelay, 10)
     const delay = Number.isNaN(parallelDelay) || parallelDelay < 0 ? 200 : parallelDelay
 
+    // 【定制版加固】两种模式：
+    //   tryAllProviders !== false（默认）：首选DNS与其它DNS一起并发竞赛，取最快的。
+    //   tryAllProviders === false：先只查首选DNS（ech.dns + mapping）；
+    //     首选全部失败后**仍然兜底查一次其它DNS**。
+    //   原因：用户可能把 ech.dns 指向自建 DoH 端点，而端点一旦被 RST/失效，ECH 就完全哑火，
+    //   表现为「ECH 明明开着却不起作用」。这个兜底保证 ECH 链路不会因为单个自定义端点而彻底断掉。
+    if (dnsConfig.ech.tryAllProviders !== false) {
+      return await this._raceEchDns(primary.concat(fallback), hostname, delay)
+    }
+
+    const ech = await this._raceEchDns(primary, hostname, delay)
+    if (ech != null) {
+      return ech
+    }
+
+    if (fallback.length > 0) {
+      log.warn(`[ECH] 首选DNS均未返回ECH参数，兜底查询其它DNS: ${hostname}`)
+      return await this._raceEchDns(fallback, hostname, 0)
+    }
+
+    return null
+  },
+
+  /**
+   * 并发向多个DNS查询ECH参数，返回最先成功的结果
+   *
+   * @param {Array} dnsList DNS实例列表（会按 dnsName 去重，并过滤掉未启用ECH的）
+   * @param {string} hostname 域名
+   * @param {number} delay 第2个及之后的DNS延迟启动的毫秒数（0 表示全部立即并发）
+   * @returns {Promise<null|object>}
+   */
+  async _raceEchDns (dnsList, hostname, delay) {
+    const list = []
+    const tried = new Set()
+    for (const dns of dnsList) {
+      if (dns == null || tried.has(dns) || !dns.echEnabled) {
+        continue
+      }
+      tried.add(dns)
+      list.push(dns)
+    }
+
+    if (list.length === 0) {
+      return null
+    }
+
     return await new Promise((resolve) => {
-      let pending = dnsList.length
+      let pending = list.length
       const done = (ech) => {
         if (ech != null) {
           resolve(ech)
@@ -391,7 +436,7 @@ module.exports = {
           resolve(null)
         }
       }
-      dnsList.forEach((dns, index) => {
+      list.forEach((dns, index) => {
         const query = () => {
           dns.lookupEch(hostname)
             .then(done)

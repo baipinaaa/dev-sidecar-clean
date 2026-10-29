@@ -104,6 +104,23 @@ const defaultConfig = {
     host: '127.0.0.1',
     port: 31181,
     fakeServerMaxLength: 100, // fakeServer的最大缓存数量
+
+    // 【本版本定制】TLS ClientHello 分段发送（TCP segmentation）
+    // 作用：把首个 ClientHello 在 TCP 层切成若干小段依次发送，让按 SNI 做 DPI 的中间设备
+    //       无法跨段重组出域名，从而放行。不改任何字节 —— SNI 仍是真实域名，证书照常校验，
+    //       CDN 也能按真实 SNI 正确路由（这是它相对「SNI 伪装成 baidu.com」的关键优势）。
+    // 适用：TCP 能连、但 TLS 握手被 RST 或注入 的站点（典型：只按 SNI 封锁的域名）。
+    // 不适用：IP 层就被封锁的站点，或握手后数据面被识别的情况。
+    // 作用域：仅 CONNECT 纯隧道；配置在 intercepts 里的域名会被 MITM，走不到这里。
+    tlsFragment: {
+      enabled: true,
+      size: 32, // 每段字节数（太小会增加系统调用开销，太大可能不足以打散 SNI）
+      maxBytes: 2048, // 只对首包前 N 字节分段，超出部分一次写完
+      domains: [
+        '*linux.do',
+        '*pixiv.net',
+      ],
+    },
     setting: {
       NODE_TLS_REJECT_UNAUTHORIZED: true,
       verifySsl: true,

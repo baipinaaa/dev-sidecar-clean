@@ -5,6 +5,7 @@ const log = require('../../../utils/util.log.server')
 const DnsUtil = require('../../dns')
 const dnsLookup = require('./dnsLookup')
 const trafficMonitor = require('../../traffic/TrafficMonitor')
+const tlsFragmentUtil = require('../common/tls-fragment')
 
 // 假 TLS 服务器的接入地址（DS 进程内部回环）。
 // 注意与「绑定IP」(config.server.host) 区分：后者是代理端口 31181 的监听地址，
@@ -24,7 +25,7 @@ function isSslConnect (sslConnectInterceptors, req, cltSocket, head) {
 }
 
 // create connectHandler function
-module.exports = function createConnectHandler (sslConnectInterceptor, middlewares, fakeServerCenter, dnsConfig, compatibleConfig) {
+module.exports = function createConnectHandler (sslConnectInterceptor, middlewares, fakeServerCenter, dnsConfig, compatibleConfig, tlsFragment = null) {
   // return
   const sslConnectInterceptors = []
   sslConnectInterceptors.push(sslConnectInterceptor)
@@ -159,10 +160,26 @@ function connect (req, cltSocket, head, hostname, port, dnsConfig = null, isDire
       cltSocket.write('HTTP/1.1 200 Connection Established\r\n'
         + 'Proxy-agent: dev-sidecar\r\n'
         + '\r\n')
-      proxySocket.write(head)
       proxySocket.pipe(cltSocket)
 
-      cltSocket.pipe(proxySocket)
+      // 【本版本定制】TLS ClientHello 分段发送，绕过按 SNI 做 DPI 的封锁。
+      // 只对 server.tlsFragment.domains 里声明的域名生效；不命中时走原生 pipe，零额外开销。
+      // 作用域仅限 CONNECT 纯隧道（MITM 场景下 ClientHello 由 DS 自己发起，不经过这里）。
+      const fragOpt = tlsFragment ? tlsFragmentUtil.getFragmentOption({ tlsFragment }, hostname) : null
+      if (fragOpt) {
+        log.debug(`[TLS分片] 命中 ${hostname}，首包按 ${fragOpt.size}B 分段`)
+        tlsFragmentUtil.createFragmentForwarder({
+          source: cltSocket,
+          target: proxySocket,
+          head,
+          size: fragOpt.size,
+          maxBytes: fragOpt.maxBytes,
+          log,
+        })
+      } else {
+        proxySocket.write(head)
+        cltSocket.pipe(proxySocket)
+      }
     })
     proxySocket.on('timeout', () => {
       const cost = Date.now() - start

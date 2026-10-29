@@ -27,6 +27,7 @@ module.exports = {
     dnsConfig,
     setting,
     compatibleConfig,
+    tlsFragment,
   }, callback) {
     // Don't reject unauthorized
     // process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0'
@@ -83,6 +84,7 @@ module.exports = {
       fakeServersCenter,
       dnsConfig,
       compatibleConfig,
+      tlsFragment,
     )
 
     // 单端口：HTTP 代理（绝对 URL）与 HTTPS CONNECT 共用同一端口
