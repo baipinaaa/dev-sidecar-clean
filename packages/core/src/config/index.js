@@ -1832,7 +1832,9 @@ Object.assign(defaultConfig.server, {
       emptyTtl: 600000,
       minTtl: 60000,
       maxTtl: 3600000,
-      tryAllProviders: true,
+      // 【定制版】默认只从「同源」提供方获取 ECH 参数（A 记录来自哪个 DNS，ECH 就从哪个 DNS 取）。
+      // 置为 true 会回到旧行为：所有提供方一起竞速，A 记录与 ECH 可能来自不同提供方。
+      tryAllProviders: false,
       parallelDelay: 200,
     },
     nat64: {

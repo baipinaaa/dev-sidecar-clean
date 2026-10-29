@@ -5,6 +5,7 @@ const { isIPv6 } = require('./util.ip')
 const svcbUtil = require('./util.svcb')
 const { DynamicChoice } = require('../choice/index')
 const os = require('node:os')
+const net = require('node:net')
 
 // 启动时检测系统是否有 IPv6 网络能力（遍历本机网卡），无则过滤所有 IPv6 DNS 结果
 // 注意：忽略 fe80::/10 本地链路地址，它们不代表实际上游 IPv6 连通性
@@ -71,6 +72,39 @@ class IpCache extends DynamicChoice {
     super.setBackupList(newBackupList)
     this.lookupCount++
   }
+
+  /**
+   * 返回该域名的全部候选地址（当前选中地址在首位，其余按成功率排序）
+   *
+   * 用于并行拨号（Happy Eyeballs）：一次把多个地址交给 Node，由 Node 按 250ms 阶梯
+   * 交替尝试，先连通者胜，坏地址不再拖住整个请求。
+   *
+   * @returns {Array<{address: string, family: number}>}
+   */
+  getCandidateList () {
+    const now = Date.now()
+    const list = []
+    const seen = new Set()
+
+    const push = (ip) => {
+      if (ip == null || ip === this.key || seen.has(ip)) {
+        return
+      }
+      // 排除域名兕底项、非法地址、拉黑期内的地址
+      const family = net.isIP(ip)
+      if (family === 0 || this.isBanned(ip, now)) {
+        return
+      }
+      seen.add(ip)
+      list.push({ address: ip, family })
+    }
+
+    push(this.value)
+    for (const ip of this.backupList) {
+      push(ip)
+    }
+    return list
+  }
 }
 
 module.exports = class BaseDNS {
@@ -109,6 +143,20 @@ module.exports = class BaseDNS {
     if (ipCache) {
       ipCache.doCount(ip, isError)
     }
+  }
+
+  /**
+   * 获取该域名当前的候选地址列表（并行拨号用）
+   *
+   * @param hostname 域名
+   * @returns {Array<{address: string, family: number}>} 当前选中地址在首位，其余按成功率排序
+   */
+  getCandidates (hostname) {
+    const ipCache = this.cache.get(hostname)
+    if (ipCache == null || typeof ipCache.getCandidateList !== 'function') {
+      return []
+    }
+    return ipCache.getCandidateList()
   }
 
   /**

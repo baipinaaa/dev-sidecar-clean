@@ -357,6 +357,11 @@ module.exports = function createRequestHandler (createIntercepts, middlewares, e
               if (dnsAndFamily.family === 6) {
                 rOptions.family = 6
               }
+              // 【定制版】并行拨号（Happy Eyeballs）：多地址同时尝试，先连通者胜
+              if (rOptions.autoSelectFamily == null) {
+                rOptions.autoSelectFamily = true
+                rOptions.autoSelectFamilyAttemptTimeout = 250
+              }
               log.debug(`域名 ${rOptions.hostname} DNS: ${dnsAndFamily.dns.dnsName}, family: ${rOptions.family || 4}`)
               dnsHeaderLabel = dnsAndFamily.dns.dnsName === '预设IP' ? 'PreSet' : dnsAndFamily.dns.dnsName.replace(/[^\x20-\x7E]/g, '')
               res.setHeader('DS-DNS', dnsHeaderLabel)

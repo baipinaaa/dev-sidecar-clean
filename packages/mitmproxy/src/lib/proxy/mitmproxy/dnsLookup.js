@@ -49,9 +49,31 @@ function rewriteCloudflareIp (hostname, ip, isPreSet) {
   return rewritten
 }
 
-function respondLookup (callback, ip, family, all) {
+function respondLookup (callback, ip, family, all, moreCandidates) {
   if (all) {
-    callback(null, [{ address: ip, family }])
+    // 并行拨号（Happy Eyeballs）：Node 20+ 会以 { all: true } 调 lookup，期望拿到全部候地址。
+    // 原实现只回传一个地址，于是「多 IP 竞争连接」彻底失效：坏地址要等到 connect 超时
+    // （连接超时/系统 SYN 重试）才换，表现为该域名卡 5~27 秒。
+    const list = []
+    const seen = new Set()
+    const push = (address, fam) => {
+      if (!isValidIpAddress(address) || seen.has(address)) {
+        return
+      }
+      seen.add(address)
+      list.push({ address, family: fam })
+    }
+
+    push(ip, family)
+    if (Array.isArray(moreCandidates)) {
+      for (const item of moreCandidates) {
+        if (item != null) {
+          push(item.address, item.family)
+        }
+      }
+    }
+
+    callback(null, list.length > 0 ? list : [{ address: ip, family }])
     return
   }
 
@@ -101,6 +123,13 @@ module.exports = {
 
     return (hostname, options, callback) => {
       const all = options && options.all === true
+      // 并行拨号：all 模式下附带该域名的全部候选地址，交给 Node 做 RFC 8305 竞争连接
+      const candidatesOf = (dnsInstance) => {
+        if (!all || dnsInstance == null || typeof dnsInstance.getCandidates !== 'function') {
+          return null
+        }
+        return dnsInstance.getCandidates(hostname)
+      }
       const defaultLookup = (options, callback) => {
         defaultDns.lookup(hostname, options, (err, address, family) => {
           if (!err) {
@@ -140,7 +169,7 @@ module.exports = {
             const dnsLabel = aliveIpObj.dns === '预设IP' ? 'PreSet' : safeHeaderValue(aliveIpObj.dns)
             res.setHeader('DS-DNS', `${dnsLabel}: ${aliveIpObj.host} (IPv${addressFamily})`)
           }
-          respondLookup(callback, aliveIpObj.host, addressFamily, all)
+          respondLookup(callback, aliveIpObj.host, addressFamily, all, candidatesOf(dns))
           return
         } else {
           log.info(`----- ${action}: ${hostname}, no valid alive ip${target}, tester: { "ready": ${tester.ready}, "backupList": ${JSON.stringify(tester.backupList)} }`)
@@ -165,7 +194,7 @@ module.exports = {
             const dnsLabel = probe.dns === '预设IP' ? 'PreSet' : safeHeaderValue(probe.dns)
             res.setHeader('DS-DNS', `${dnsLabel}: ${probe.host} (IPv${addressFamily})`)
           }
-          respondLookup(callback, probe.host, addressFamily, all)
+          respondLookup(callback, probe.host, addressFamily, all, candidatesOf(dns))
           return
         }
       }
@@ -217,7 +246,7 @@ module.exports = {
           if (res) {
             res.setHeader('DS-DNS', `${safeHeaderValue(fallback.dnsName)}: ${fallback.ip} (IPv${fallbackFamily})`)
           }
-          respondLookup(callback, fallback.ip, fallbackFamily, all)
+          respondLookup(callback, fallback.ip, fallbackFamily, all, candidatesOf(dns))
           return
         }
         // 不继承原 family 选项：强制 IPv6 时若系统 DNS 无 AAAA，会误报 ENOTFOUND，此时应允许系统 DNS 返回 IPv4
@@ -252,7 +281,7 @@ module.exports = {
             const dnsLabel = usedDns.dnsName === '预设IP' ? 'PreSet' : safeHeaderValue(usedDns.dnsName)
             res.setHeader('DS-DNS', `${dnsLabel}: ${ip} (IPv${addressFamily})`)
           }
-          respondLookup(callback, ip, addressFamily, all)
+          respondLookup(callback, ip, addressFamily, all, candidatesOf(usedDns))
         } else {
           // 主 DNS 没给出可用 IP：先兜底到其它 DNS 提供方，再退回系统 DNS
           if (ip != null && ip !== hostname && !isValidIpAddress(ip)) {

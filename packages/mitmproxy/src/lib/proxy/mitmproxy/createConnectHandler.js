@@ -138,6 +138,11 @@ function connect (req, cltSocket, head, hostname, port, dnsConfig = null, isDire
       port,
       host: hostname,
       connectTimeout: 10000,
+      // 【定制版】Happy Eyeballs（RFC 8305）：同一域名有多个地址时并行拨号，
+      // 250ms 阶梓起下一个，先连通者胜；坏 IP 不再拖到 connect 超时。
+      // 配合 dnsLookup.js 的 all 模式回传全部候选地址生效（Node 20+）。
+      autoSelectFamily: true,
+      autoSelectFamilyAttemptTimeout: 250,
     }
     if (dnsConfig && dnsConfig.dnsMap) {
       const dnsAndFamily = DnsUtil.getDNSAndFamily(dnsConfig, hostname)
@@ -149,6 +154,19 @@ function connect (req, cltSocket, head, hostname, port, dnsConfig = null, isDire
         }
       }
     }
+
+    // 【定制版】并行拨号（autoSelectFamily）下，Node 会逐个尝试多个地址并回报每个地址的成败。
+    // 按「实际尝试失败的地址」计数，避免一次失败把整个域名的首选地址拉黑。
+    let perAttemptReported = false
+    const countAttemptFailure = (ip, reason) => {
+      if (!isDnsIntercept || !isDnsIntercept.dns || ip == null || ip === hostname) {
+        return
+      }
+      perAttemptReported = true
+      isDnsIntercept.dns.count(hostname, ip, true)
+      log.error(`记录ip失败次数（并行拨号）: hostname: ${hostname}, ip: ${ip}, reason: ${reason}, dns: ${isDnsIntercept.dns.dnsName}`)
+    }
+
     // 代理连接事件监听
     const proxySocket = net.connect(options, () => {
       if (!isDirect) {
@@ -181,6 +199,8 @@ function connect (req, cltSocket, head, hostname, port, dnsConfig = null, isDire
         cltSocket.pipe(proxySocket)
       }
     })
+    proxySocket.on('connectionAttemptFailed', (ip) => countAttemptFailure(ip, 'connectionAttemptFailed'))
+    proxySocket.on('connectionAttemptTimeout', (ip) => countAttemptFailure(ip, 'connectionAttemptTimeout'))
     proxySocket.on('timeout', () => {
       const cost = Date.now() - start
       const errorMsg = `${isDirect ? '直连' : '代理连接'}超时: ${hostport}, cost: ${cost} ms`
@@ -192,7 +212,7 @@ function connect (req, cltSocket, head, hostname, port, dnsConfig = null, isDire
       cltSocket.end()
       cltSocket.destroy()
 
-      if (isDnsIntercept && isDnsIntercept.dns && isDnsIntercept.ip !== isDnsIntercept.hostname) {
+      if (!perAttemptReported && isDnsIntercept && isDnsIntercept.dns && isDnsIntercept.ip !== isDnsIntercept.hostname) {
         const { dns, ip, hostname } = isDnsIntercept
         dns.count(hostname, ip, true)
         log.error(`记录ip失败次数，用于优选ip！ hostname: ${hostname}, ip: ${ip}, reason: ${errorMsg}, dns: ${dns.dnsName}`)
@@ -210,7 +230,7 @@ function connect (req, cltSocket, head, hostname, port, dnsConfig = null, isDire
       cltSocket.end()
       cltSocket.destroy()
 
-      if (isDnsIntercept && isDnsIntercept.dns && isDnsIntercept.ip !== isDnsIntercept.hostname) {
+      if (!perAttemptReported && isDnsIntercept && isDnsIntercept.dns && isDnsIntercept.ip !== isDnsIntercept.hostname) {
         const { dns, ip, hostname } = isDnsIntercept
         dns.count(hostname, ip, true)
         log.error(`记录ip失败次数，用于优选ip！ hostname: ${hostname}, ip: ${ip}, reason: ${errorMsg}, dns: ${dns.dnsName}`)

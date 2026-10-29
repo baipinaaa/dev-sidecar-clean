@@ -352,23 +352,27 @@ module.exports = {
     const primary = []
     const fallback = []
 
-    // 0. ECH专用DNS：优先查询（放在首位，由下面的并发竞赛逻辑保证它先发出）
+    // 【定制版改造】与浏览器「安全DNS」对齐：ECH 参数必须和 A 记录来自同一个提供方。
+    // 因此把「该域名实际用于解析 A 记录的 DNS」放在首位（ECH 域名下它就是 ech.dns），
+    // ech.dns 次之（两者通常同一个实例，会自动去重）。
+    const dnsData = this.getDNSAndFamily(dnsConfig, hostname)
+    const addrDns = dnsData != null ? dnsData.dns : null
     const echDns = this.getEchDNS(dnsConfig)
-    if (echDns != null) {
-      if (echDns.echEnabled) {
-        primary.push(echDns)
-      } else {
-        log.warn(`[ECH] ECH专用DNS '${echDns.dnsName}' 未启用ECH查询，将回退到域名映射的DNS: ${hostname}`)
+
+    for (const dns of [addrDns, echDns]) {
+      if (dns == null || primary.includes(dns)) {
+        continue
+      }
+      if (dns.echEnabled) {
+        primary.push(dns)
       }
     }
 
-    // 1. 该域名映射到的DNS
-    const dnsData = this.getDNSAndFamily(dnsConfig, hostname)
-    if (dnsData != null && dnsData.dns != null) {
-      primary.push(dnsData.dns)
+    if (echDns != null && !echDns.echEnabled) {
+      log.warn(`[ECH] ECH专用DNS '${echDns.dnsName}' 未启用ECH查询，将回退到域名映射的DNS: ${hostname}`)
     }
 
-    // 2. 默认用于SNI的DNS / 3. 其它DNS（作为备选）
+    // 其它提供方只在「首选全部失败」时才逐个使用（见下方串行兜底）。
     if (dnsConfig.dnsMap.ForSNI != null) {
       fallback.push(dnsConfig.dnsMap.ForSNI)
     }
@@ -376,18 +380,17 @@ module.exports = {
       fallback.push(dnsConfig.dnsMap[dnsName])
     }
 
-    // 并发查询：映射的DNS优先查询，其余DNS延迟一小段时间后并发查询，取最先返回的结果。
-    // 原因：串行查询时，前面DNS的超时（如DoT 4秒、本机DNS 5秒）会拖慢整个建连过程，导致代理请求超时。
     const parallelDelay = Number.parseInt(dnsConfig.ech.parallelDelay, 10)
     const delay = Number.isNaN(parallelDelay) || parallelDelay < 0 ? 200 : parallelDelay
 
     // 【定制版加固】两种模式：
-    //   tryAllProviders !== false（默认）：首选DNS与其它DNS一起并发竞赛，取最快的。
-    //   tryAllProviders === false：先只查首选DNS（ech.dns + mapping）；
-    //     首选全部失败后**仍然兜底查一次其它DNS**。
-    //   原因：用户可能把 ech.dns 指向自建 DoH 端点，而端点一旦被 RST/失效，ECH 就完全哑火，
-    //   表现为「ECH 明明开着却不起作用」。这个兜底保证 ECH 链路不会因为单个自定义端点而彻底断掉。
-    if (dnsConfig.ech.tryAllProviders !== false) {
+    //   tryAllProviders === true：首选与其它 DNS 一起并发竞赛，取最快返回的（旧行为）。
+    //     代价：A 记录与 ECH 参数可能来自不同提供方，两者指向的边缘节点不一定一致。
+    //   tryAllProviders !== false（默认）：只用首选提供方（同源）；它全部失败后才用其它
+    //     提供方逐个串行兜底。
+    //   为什么默认改成同源：浏览器就是这样做的，而被实测污染的公共 DNS 一旦参与竞速，
+    //     就会把“能返回但不可用”的答案塞进来，表现为「ECH 开着却上不去」。
+    if (dnsConfig.ech.tryAllProviders === true) {
       return await this._raceEchDns(primary.concat(fallback), hostname, delay)
     }
 
@@ -396,9 +399,20 @@ module.exports = {
       return ech
     }
 
-    if (fallback.length > 0) {
-      log.warn(`[ECH] 首选DNS均未返回ECH参数，兜底查询其它DNS: ${hostname}`)
-      return await this._raceEchDns(fallback, hostname, 0)
+    // 串行兜底：保持优先级确定性，不竞速
+    for (const dns of fallback) {
+      if (dns == null || primary.includes(dns) || !dns.echEnabled) {
+        continue
+      }
+      try {
+        const result = await dns.lookupEch(hostname)
+        if (result != null) {
+          log.warn(`[ECH] 首选DNS均未返回ECH参数，改用 '${dns.dnsName}' 兜底: ${hostname} ➜ ${result.publicName}`)
+          return result
+        }
+      } catch (e) {
+        log.warn(`[ECH] 兜底DNS '${dns.dnsName}' 查询ECH参数失败: ${hostname}, error:`, e)
+      }
     }
 
     return null

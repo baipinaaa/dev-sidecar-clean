@@ -75,6 +75,11 @@ module.exports = function createUpgradeHandler (serverSetting, externalProxy, dn
         if (dnsAndFamily.family === 6) {
           clientOptions.family = 6
         }
+        // 【定制版】并行拨号（Happy Eyeballs）：多地址同时尝试，先连通者胜
+        if (clientOptions.autoSelectFamily == null) {
+          clientOptions.autoSelectFamily = true
+          clientOptions.autoSelectFamilyAttemptTimeout = 250
+        }
       } else {
         clientOptions.lookup = dnsLookup.createDefaultLookupFunc(null, 'upgrade', clientOptions.hostname + ':' + clientOptions.port, DnsUtil.getFallbackDnsList(dnsConfig, null))
       }
