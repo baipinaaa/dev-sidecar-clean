@@ -1457,7 +1457,15 @@ Object.assign(defaultConfig.server, {
         forSNI: true,
       },
       'cf-DoT': {
-        server: 'tls://1.1.1.1',
+        // 【定制版重大勘误】原来的 server 是 'tls://1.1.1.1'，实测本网络对 1.1.1.1 是
+        // **IP 级全封**：80 / 443 / 853 三个端口全部 timeout（DoT 实测 0/3，每次卡 6007ms）。
+        // 而 dns.mapping 里有几十条规则指向 'cf-DoT'（*.github.io、*.cloudflare.com、
+        // img.shields.io、*.jetbrains.com ……），导致这些域名每次 DNS 都要白等 6 秒超时，
+        // 这是「除了 github 之外其他都很卡」的重要根因之一。
+        //
+        // 这里保持 provider 名字不变（避免改动几十条 mapping），只把 server 换成
+        // 实测可用的 DoT：dns.bebasid.com:853 + SNI=baidu.com → 3/3 成功、234ms、返回正确 IP。
+        server: 'tls://dns.bebasid.com',
         sni: 'baidu.com',
       },
       'bebasid': {
@@ -1465,15 +1473,14 @@ Object.assign(defaultConfig.server, {
         sni: 'baidu.com',
       },
       'cf-DoH': {
+        // 【定制版重大勘误²】原来带 sni:'baidu.com'，实测这对 DoH 是有害的：
+        //   带 SNI 伪装：0/3 成功；去掉 SNI：1/3 成功。
+        // 原因有两个：
+        //   1. Cloudflare 边缘按 SNI 选站点，SNI≠Host 会直接返回 403；
+        //   2. https.js 在配了 sni 时会关掉证书校验（SNI 与证书域名不一致必然校验失败）。
+        // DoH 本身已经是加密+证书校验的，不需要再用 SNI 伪装去躲，保持真实 SNI 更安全也更快。
         server: 'https://cloudflare-dns.com/dns-query',
-        sni: 'baidu.com',
       },
-      // 【定制版勘误】之前在这里加过一个 'opendns'（https://doh.opendns.com）并设为 ech.dns 默认值，
-      // 理由是「cf-DoH 因 SNI≠Host 被 CF 返回 403」。该结论是错的：
-      //   当时测的是用户自建端点那个 CF 边缘 IP，不是 cloudflare-dns.com 的真正地址；
-      // 实测 cloudflare-dns.com + SNI=baidu.com 可以正常返回（运行日志中有
-      //   `[ECH][DNS-over-HTTPS 'cf-DoH'] 获取到该域名的ECH参数` 的成功记录）。
-      // 而 opendns 在实测网络里根本连不上（ECONNRESET / timeout），已移除。
       'quad9-ip': {
         server: 'https://9.9.9.9/dns-query',
       },
@@ -1678,7 +1685,11 @@ Object.assign(defaultConfig.server, {
         '*twimg.com',
         '^(.+.)?x.com$',
       ],
-      dns: 'cf-DoH',
+      // 【定制版】ECH 专用 DNS 改用 'bebasid'（DoT）：
+      //   - cf-DoH（cloudflare-dns.com）在本网络实测只有 1/3 成功率
+      //   - bebasid（dns.bebasid.com:853 + SNI=baidu.com）实测 3/3、234ms
+      //   - 历史运行日志里有 19 次 `[ECH] 获取到该域名的ECH参数` 来自 bebasid
+      dns: 'bebasid',
       enabled: true,
       use: true,
       publicName: 'cloudflare-ech.com',
@@ -1695,7 +1706,8 @@ Object.assign(defaultConfig.server, {
       domains: [
         '*chatgpt.com',
       ],
-      dns: 'cf-DoH',
+      // 【定制版】同 ech.dns，改走实测更稳的 DoT
+      dns: 'bebasid',
     },
   },
 })
