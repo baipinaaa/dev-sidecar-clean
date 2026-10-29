@@ -1468,13 +1468,12 @@ Object.assign(defaultConfig.server, {
         server: 'https://cloudflare-dns.com/dns-query',
         sni: 'baidu.com',
       },
-      // 【定制版新增】注意：cf-DoH 实际不可用。cloudflare-dns.com 本身由 Cloudflare 托管，
-      // CF 按 SNI 选择 zone，SNI=baidu.com 而 Host=cloudflare-dns.com 时一律返回 403（已实测）。
-      // 改用非 CF 托管的 OpenDNS；它同样接受 wire format，且能返回未被污染的 A 记录。
-      'opendns': {
-        server: 'https://doh.opendns.com/dns-query',
-        cacheSize: 1024,
-      },
+      // 【定制版勘误】之前在这里加过一个 'opendns'（https://doh.opendns.com）并设为 ech.dns 默认值，
+      // 理由是「cf-DoH 因 SNI≠Host 被 CF 返回 403」。该结论是错的：
+      //   当时测的是用户自建端点那个 CF 边缘 IP，不是 cloudflare-dns.com 的真正地址；
+      // 实测 cloudflare-dns.com + SNI=baidu.com 可以正常返回（运行日志中有
+      //   `[ECH][DNS-over-HTTPS 'cf-DoH'] 获取到该域名的ECH参数` 的成功记录）。
+      // 而 opendns 在实测网络里根本连不上（ECONNRESET / timeout），已移除。
       'quad9-ip': {
         server: 'https://9.9.9.9/dns-query',
       },
@@ -1556,8 +1555,13 @@ Object.assign(defaultConfig.server, {
       '*steamdb.info': 'cf-DoT',
       // 【本版定制】linux.do 在国内被 DNS 污染（nslookup 返回 Twitter 的 199.59.149.203 /
       // Facebook 的 2a03:2880:: 段），而它只在 ech.domains 里，A 记录仍然走本地 DNS。
-      // 加进 dns.mapping 让它走加密 DoT，ECH 才有可能真正生效。
-      '*linux.do': 'cf-DoT',
+      // 加进 dns.mapping 让它走加密 DoH，ECH 才有可能真正生效。
+      // 注意不能走 cf-DoT：tls://1.1.1.1 在当前网络 IP 级被封（实测 80/443/853 全部 timeout）。
+      '*linux.do': 'cf-DoH',
+      // 【本版定制】pixiv.net 不在 Cloudflare 上（下发的 HTTPS 记录里没有 ECH 参数），
+      // 放进 ech.domains 只会把它的 A 查询误导向 ECH 专用 DNS。这里改为直接指定 DoH：
+      // 国内 DNS（阿里/腾讯/360）对 pixiv.net 全部返回污染结果（31.13.x / 185.45.6.103 等）。
+      '*pixiv.net': 'cf-DoH',
       // 【本版定制】steamcommunity.com 主站同样被污染（128.121.243.77）。
       // 注意：`_lookupWithPreSetIpList()` 优先于 dns.mapping，而 `*.steamcommunity.com`
       // 已有 preSetIpList，所以正常路径不会走到这里。此条仅在预设 IP 全部失败、
@@ -1637,7 +1641,9 @@ Object.assign(defaultConfig.server, {
         '*sci-hub.pub',
         '^(.+.)?x.com$',
         '*docker.com',
-        '*pixiv.net',
+        // 【定制版】pixiv.net 已从这里移除：它不在 Cloudflare 上，
+        // 下发的 HTTPS 记录里没有 ECH 参数（实测 SvcParams 只有 1/4/6，key=5 缺失），
+        // 而且放在这里会让它的 A 查询被导向 ECH 专用 DNS。A 记录改由 dns.mapping 指定 cf-DoH。
         '*chatgpt.com',
         '*civitai.com',
         '*ldstatic.com',
@@ -1667,7 +1673,7 @@ Object.assign(defaultConfig.server, {
         '*twimg.com',
         '^(.+.)?x.com$',
       ],
-      dns: 'opendns',
+      dns: 'cf-DoH',
       enabled: true,
       use: true,
       publicName: 'cloudflare-ech.com',
@@ -1684,7 +1690,7 @@ Object.assign(defaultConfig.server, {
       domains: [
         '*chatgpt.com',
       ],
-      dns: 'opendns',
+      dns: 'cf-DoH',
     },
   },
 })
