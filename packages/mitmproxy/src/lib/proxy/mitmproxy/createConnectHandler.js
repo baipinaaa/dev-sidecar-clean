@@ -47,7 +47,7 @@ module.exports = function createConnectHandler (sslConnectInterceptor, middlewar
       trafficMonitor.attachConnect(req, cltSocket)
       fakeServerCenter.getServerPromise(hostname, port, ssl, compatibleConfig).then((serverObj) => {
         log.info(`----- fakeServer connect: ${localIP}:${serverObj.port} ➜ ${req.url} -----`)
-        const proxySocket = connect(req, cltSocket, head, localIP, serverObj.port, null, false, hostname)
+        const proxySocket = connect(req, cltSocket, head, localIP, serverObj.port, null, false, hostname, null)
         if (proxySocket) {
           const bindInternalMap = () => {
             if (proxySocket.localPort && cltSocket.remotePort) {
@@ -75,12 +75,12 @@ module.exports = function createConnectHandler (sslConnectInterceptor, middlewar
         log.info(`不拦截请求，直连目标服务器: ${hostname}:${port}, headers:`, Object.keys(req.headers || {}).join(','))
       }
       trafficMonitor.attachConnect(req, cltSocket)
-      connect(req, cltSocket, head, hostname, port, dnsConfig, true)
+      connect(req, cltSocket, head, hostname, port, dnsConfig, true, null, tlsFragment)
     }
   }
 }
 
-function connect (req, cltSocket, head, hostname, port, dnsConfig = null, isDirect = false, target = null) {
+function connect (req, cltSocket, head, hostname, port, dnsConfig = null, isDirect = false, target = null, tlsFragment = null) {
   // tunneling https
   // log.info('connect:', hostname, port)
   const start = Date.now()
