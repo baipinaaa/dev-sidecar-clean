@@ -126,6 +126,23 @@ jobs:
           "tag=$tag" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           Write-Host "release tag = $tag"
 
+      # 【定制版】把 Release 标签的版本号写回 packages/gui/package.json。
+      # 原因：electron-builder 的安装包产品版本、artifactName、latest.yml 全部取自
+      # packages/gui/package.json 的 version，与 Release 标签无关。
+      # 不同步的话，用 v2.3.5 构建出来的安装包仍然是 2.3.4。
+      - name: "同步版本号（安装包版本跟随 Release 标签）"
+        id: ver
+        shell: pwsh
+        run: |
+          $tag = "${{ steps.rel.outputs.tag }}".Trim()
+          $ver = $tag -replace '^[vV]', ''
+          if ($ver -notmatch '^\d+\.\d+\.\d+([-+][0-9A-Za-z.-]+)?$') {
+            throw "标签 '$tag' 不是合法版本号，请使用 vX.Y.Z 形式（如 v2.3.5）"
+          }
+          # 直接改写 JSON 对象的 version 字段：保留键顺序与 2 空格缩进，diff 最小
+          node --input-type=commonjs -e "const fs=require('fs');const p='packages/gui/package.json';const j=JSON.parse(fs.readFileSync(p,'utf8'));const old=j.version;j.version=process.argv[1];fs.writeFileSync(p,JSON.stringify(j,null,2)+'\n');console.log('packages/gui 版本号: '+old+' -> '+j.version)" $ver
+          "version=$ver" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
       - name: "构建（npm run electron:build:ci）"
         working-directory: packages/gui
         env:
@@ -144,7 +161,7 @@ jobs:
       - name: "上传产物（artifact，便于调试下载）"
         uses: actions/upload-artifact@v4
         with:
-          name: DevSidecar-${{ steps.pkg.outputs.version }}-windows
+          name: DevSidecar-${{ steps.ver.outputs.version }}-windows
           path: |
             packages/gui/dist_electron/*.exe
             packages/gui/dist_electron/*.exe.blockmap
