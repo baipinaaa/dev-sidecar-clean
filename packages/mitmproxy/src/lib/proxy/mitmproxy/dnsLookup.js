@@ -11,6 +11,41 @@ function safeHeaderValue (value) {
   return String(value).replace(/[^\x20-\x7E]/g, '')
 }
 
+// 【定制版】给单次 DNS 查询套一个时间上限。
+// 背景：兜底链里只要有提供方不可达（国内访问 1.1.1.1 / 9.9.9.9 常见全超时），
+// 串行 await 就会每个白等 8 秒；实测 ldstatic.com 因此卡了 30 秒以上。
+// 超时返回 null（页面上表现为“没解析出来”，继续下一个提供方）。
+function withDeadline (promise, ms) {
+  return new Promise((resolve) => {
+    let settled = false
+    const timer = setTimeout(() => {
+      if (settled) {
+        return
+      }
+      settled = true
+      resolve(null)
+    }, Math.max(0, ms))
+    promise.then(
+      (value) => {
+        if (settled) {
+          return
+        }
+        settled = true
+        clearTimeout(timer)
+        resolve(value)
+      },
+      (reason) => {
+        if (settled) {
+          return
+        }
+        settled = true
+        clearTimeout(timer)
+        resolve(Promise.reject(reason))
+      },
+    )
+  })
+}
+
 function isValidIpAddress (ip) {
   return typeof ip === 'string' && net.isIP(ip) !== 0
 }
@@ -221,12 +256,19 @@ module.exports = {
       // 预设IP 这类只在表里查的实例解析不出境外域名时会把请求推给系统 DNS，而国内系统 DNS 常返回
       // EAI_AGAIN，自动重试又会重复同一条链，因此在这里给出一条能真正解析的退路。
       const resolveByFallbackDns = async () => {
+        // 【定制版】总预算 5 秒：不可达的提供方不再一个个白等 8 秒
+        const deadline = Date.now() + 5000
         for (const fallbackDns of fallbackDnsList) {
           if (fallbackDns == null || fallbackDns === dns) {
             continue
           }
+          const remain = deadline - Date.now()
+          if (remain <= 0) {
+            log.warn(`----- ${action}: ${hostname}, 兜底 DNS 超出 5 秒预算，放弃剩余提供方${target} -----`)
+            break
+          }
           try {
-            const fallbackIp = await fallbackDns.lookup(hostname, { family, resetOnHostnameFallback })
+            const fallbackIp = await withDeadline(fallbackDns.lookup(hostname, { family, resetOnHostnameFallback }), remain)
             if (fallbackIp != null && fallbackIp !== hostname && isValidIpAddress(fallbackIp)) {
               return { ip: fallbackIp, dnsName: fallbackDns.dnsName }
             }
