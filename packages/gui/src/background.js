@@ -175,6 +175,22 @@ async function toggleTraySwitch (key, checked) {
       }
       const config = DevSidecar.api.config.get()
       config.proxy.enabled = checked
+      // 与 PAC 互斥
+      if (checked) {
+        config.proxy.pacEnabled = false
+      }
+      await DevSidecar.api.config.save(config)
+    } else if (key === 'pac') {
+      if (checked) {
+        await DevSidecar.api.proxy.startPac()
+      } else {
+        await DevSidecar.api.proxy.closePac()
+      }
+      const config = DevSidecar.api.config.get()
+      config.proxy.pacEnabled = checked
+      if (checked) {
+        config.proxy.enabled = false
+      }
       await DevSidecar.api.config.save(config)
     } else if (key === 'server') {
       if (checked) {
@@ -248,7 +264,7 @@ function setTray () {
   }
 
   // 托盘右键菜单：结构固定，仅同步勾选状态
-  const checkables = { server: null, proxy: null, plugins: {} }
+  const checkables = { server: null, proxy: null, pac: null, plugins: {} }
   let trayMenuCache = null
 
   const buildTrayMenu = () => {
@@ -260,7 +276,8 @@ function setTray () {
 
     const serverItem = { label: '代理服务', type: 'checkbox', click: menuItem => toggleTraySwitch('server', menuItem.checked) }
     const proxyItem = { label: '系统代理', type: 'checkbox', click: menuItem => toggleTraySwitch('proxy', menuItem.checked) }
-    items.push(serverItem, proxyItem)
+    const pacItem = { label: 'PAC 分流', type: 'checkbox', click: menuItem => toggleTraySwitch('pac', menuItem.checked) }
+    items.push(serverItem, proxyItem, pacItem)
 
     checkables.plugins = {}
     if (visible.length > 0) {
@@ -315,6 +332,7 @@ function setTray () {
     // 记录勾选项，后续只改 checked，不重建菜单
     checkables.server = menu.items.find(i => i.label === '代理服务')
     checkables.proxy = menu.items.find(i => i.label === '系统代理')
+    checkables.pac = menu.items.find(i => i.label === 'PAC 分流')
     for (const def of visible) {
       checkables.plugins[def.key] = menu.items.find(i => i.label === def.name)
     }
@@ -329,6 +347,9 @@ function setTray () {
       }
       if (checkables.proxy) {
         checkables.proxy.checked = !!(status.proxy && status.proxy.enabled)
+      }
+      if (checkables.pac) {
+        checkables.pac.checked = !!(status.proxy && status.proxy.pacEnabled)
       }
       for (const [key, item] of Object.entries(checkables.plugins)) {
         if (item) {

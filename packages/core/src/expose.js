@@ -75,7 +75,16 @@ async function startup ({ mitmproxyPath, setting }) {
       }
     })())
   }
-  if (conf.proxy.enabled && !status.proxy.enabled) {
+  // 系统代理有两种互斥的生效方式：固定代理 / PAC 自动分流
+  if (conf.proxy.pacEnabled && !status.proxy.pacEnabled) {
+    tasks.push((async () => {
+      try {
+        await proxy.startPac()
+      } catch (err) {
+        log.error('开启 PAC 自动分流失败：', err)
+      }
+    })())
+  } else if (!conf.proxy.pacEnabled && conf.proxy.enabled && !status.proxy.enabled) {
     tasks.push((async () => {
       try {
         await proxy.start()
@@ -126,6 +135,17 @@ async function shutdown () {
     }
   } catch (error) {
     log.error('插件关闭失败:', error)
+  }
+
+  if (status.proxy.pacEnabled) {
+    tasks.push((async () => {
+      try {
+        await proxy.closePac()
+        log.info('PAC 自动分流已关闭')
+      } catch (err) {
+        log.error('PAC 自动分流关闭失败:', err)
+      }
+    })())
   }
 
   if (status.proxy.enabled) {

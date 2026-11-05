@@ -139,7 +139,10 @@ const serverApi = {
     }
     serverConfig.plugin = lodash.cloneDeep(allConfig.plugin || {})
 
-    if (allConfig.proxy && allConfig.proxy.enabled) {
+    if (allConfig.proxy) {
+      // 始终注入：PAC 生成需要用 proxy.excludeIpList 生成直连规则，
+      // 即使「系统代理」没开（PAC 模式就是关掉固定代理的）也要带上。
+      // 注意：mitmproxy 侧只有 lib/pac.js 读 config.proxy，不影响代理行为。
       serverConfig.proxy = allConfig.proxy
     }
 

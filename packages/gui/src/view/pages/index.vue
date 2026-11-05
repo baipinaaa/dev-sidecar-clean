@@ -173,6 +173,22 @@ export default {
       const status = this.status
       btns.server = this.createSwitchBtn('server', '代理服务', this.$api.server, status)
       btns.proxy = this.createSwitchBtn('proxy', '系统代理', this.$api.proxy, status)
+      // PAC 自动分流：与「系统代理」互斥。开启后由代理服务提供 /pac.js，
+      // 系统代理改为「自动配置脚本」，只有命中加速规则的域名走代理，其余直连。
+      btns.pac = {
+        loading: false,
+        key: 'pac',
+        label: 'PAC 分流',
+        tip: '按域名自动分流：命中加速规则的站点走代理，其余站点直连（与系统代理互斥）',
+        isPlugin: false,
+        restartServer: false,
+        status: () => {
+          return this.status.proxy != null && this.status.proxy.pacEnabled === true
+        },
+        doClick: (checked) => {
+          this.onSwitchClick(this.switchBtns.pac, this.$api.proxy.startPac, this.$api.proxy.closePac, checked)
+        },
+      }
       lodash.forEach(status.plugin, (item, key) => {
         if (this.config.plugin[key].statusOff) {
           return
@@ -224,6 +240,16 @@ export default {
           this.config.server.enabled = checked
         } else if (btn.key === 'proxy') {
           this.config.proxy.enabled = checked
+          // 固定系统代理会接管 AutoConfigURL，开启时同步关掉 PAC 的持久化开关
+          if (checked) {
+            this.config.proxy.pacEnabled = false
+          }
+        } else if (btn.key === 'pac') {
+          this.config.proxy.pacEnabled = checked
+          // 与固定系统代理互斥：开启 PAC 时同步关闭固定代理的持久化开关
+          if (checked) {
+            this.config.proxy.enabled = false
+          }
         }
         const saveRet = await this.$api.config.save(lodash.cloneDeep(this.config))
         this.config = saveRet.allConfig

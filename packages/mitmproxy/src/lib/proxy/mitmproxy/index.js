@@ -4,6 +4,7 @@ const speedTest = require('../../speed/index.js')
 const trafficMonitor = require('../../traffic/TrafficMonitor')
 const { startProcessResolver } = require('../../traffic/processResolver')
 const config = require('../common/config')
+const pacUtil = require('../../pac')
 const tlsUtils = require('../tls/tlsUtils')
 const createConnectHandler = require('./createConnectHandler')
 const createFakeServerCenter = require('./createFakeServerCenter')
@@ -28,6 +29,7 @@ module.exports = {
     setting,
     compatibleConfig,
     tlsFragment,
+    pac = null,
   }, callback) {
     // Don't reject unauthorized
     // process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0'
@@ -62,8 +64,15 @@ module.exports = {
       compatibleConfig,
     )
 
+    // PAC 自动配置文件：由 /pac.js 提供，供系统代理（AutoConfigURL）拉取。
+    // 内容在代理进程启动时按运行期配置生成，配置变化会随代理重启一起更新。
+    const handlePac = pacUtil.createPacHandler(pac)
+
     // 所有 HTTP 请求（含 MITM 解密后的 HTTPS 请求）都会经过这里，统一做流量统计
     const requestHandler = (req, res, ssl) => {
+      if (handlePac(req, res)) {
+        return
+      }
       trafficMonitor.attachRequest(req, res)
       rawRequestHandler(req, res, ssl)
     }

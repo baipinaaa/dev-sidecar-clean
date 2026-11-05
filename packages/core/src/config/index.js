@@ -193,6 +193,9 @@ const defaultConfig = {
 /* eslint-disable no-template-curly-in-string -- 官方配置里存在 ${...} 形式的普通字符串（如代理目标），并非模板串 */
 Object.assign(defaultConfig, {
   proxy: {
+    // 【本版新增】PAC 自动分流：由代理服务自己提供 /pac.js，系统代理设为自动配置脚本。
+    // 开启后只有命中加速规则的域名走代理，其余直连，不再依赖巨大的 ProxyOverride 黑名单。
+    pacEnabled: false,
     // 【本版定制】官方配置默认 false（不排除国内域名），导致所有国内网站都要绕道
     // 127.0.0.1:31181 做 MITM 转发，极卡。改为 true，让国内域名直连。
     excludeDomesticDomainAllowList: true,

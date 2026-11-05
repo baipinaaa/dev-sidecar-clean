@@ -1,4 +1,5 @@
 const mitmproxy = require('./lib/proxy')
+const pacUtil = require('./lib/pac')
 const proxyConfig = require('./lib/proxy/common/config')
 const speedTest = require('./lib/speed/index.js')
 const trafficMonitor = require('./lib/traffic/TrafficMonitor')
@@ -22,6 +23,14 @@ const api = {
     delete process.env.no_proxy
 
     const proxyOptions = ProxyOptions(config)
+
+    // PAC 自动分流脚本：由代理端口以 /pac.js 提供，系统代理通过 AutoConfigURL 拉取。
+    // 在此处（而不是每次请求时）生成，保证与本次启动使用的规则完全同源。
+    const pacInfo = pacUtil.generatePac(config)
+    if (pacInfo != null) {
+      proxyOptions.pac = pacInfo
+      log.info(`PAC 已生成：代理 ${pacInfo.proxy}，走代理规则 ${pacInfo.proxyCount} 条，直连规则 ${pacInfo.directCount} 条，fingerprint=${pacInfo.hash}`)
+    }
     const setting = config.setting
     if (setting) {
       if (setting.userBasePath) {

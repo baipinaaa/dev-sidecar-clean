@@ -627,9 +627,66 @@ function removeProxyEnvFromShellProfile () {
   }
 }
 
+const WINDOWS_INTERNET_SETTINGS = 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings'
+
+/**
+ * 广播「系统代理配置已变更」。
+ *
+ * 直接写注册表的话，已经运行的程序不会立即感知：
+ *   - Chromium 系自己有注册表监听，通常 1 秒内会跟上；
+ *   - WinHTTP / WinINET 系程序需要 InternetSetOption 才会刷新（否则一直用旧值）。
+ * 这两个选项是 Windows 官方推荐的通知方式：
+ *   INTERNET_OPTION_SETTINGS_CHANGED = 39，INTERNET_OPTION_REFRESH = 37
+ */
+async function notifyWindowsInternetSettingsChanged () {
+  const script = [
+    '$sig = \'[DllImport("wininet.dll", SetLastError=true)] public static extern bool InternetSetOption(IntPtr h, int o, IntPtr b, int l);\'',
+    '$t = Add-Type -MemberDefinition $sig -Name WinInet -Namespace DsPac -PassThru',
+    '$null = $t::InternetSetOption([IntPtr]::Zero, 39, [IntPtr]::Zero, 0)',
+    '$null = $t::InternetSetOption([IntPtr]::Zero, 37, [IntPtr]::Zero, 0)',
+  ].join('; ')
+  try {
+    await execFile('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', script])
+  } catch (e) {
+    log.warn('广播系统代理变更失败（写入已生效，部分程序可能需要重启才能感知）:', e && e.message ? e.message : e)
+  }
+}
+
+/**
+ * 设置 / 清除 Windows 的 PAC 自动配置（AutoConfigURL）。
+ *
+ * 这条路径刻意**不经过** @starknt/sysproxy：它的 manual 模式会把 AutoConfigURL 清掉，
+ * 二者互斥。PAC 模式必须由我们自己独占写入，否则会被系统代理开关反复覆盖。
+ */
+async function setWindowsPacProxy (pacUrl) {
+  if (pacUrl) {
+    await execFile('reg.exe', ['add', WINDOWS_INTERNET_SETTINGS, '/v', 'AutoConfigURL', '/t', 'REG_SZ', '/d', pacUrl, '/f'])
+    // PAC 模式下必须关掉固定代理，否则固定代理优先级更高，PAC 不会生效
+    await execFile('reg.exe', ['add', WINDOWS_INTERNET_SETTINGS, '/v', 'ProxyEnable', '/t', 'REG_DWORD', '/d', '0', '/f'])
+    log.info(`已设置系统 PAC 自动配置：${pacUrl}`)
+  } else {
+    try {
+      await execFile('reg.exe', ['delete', WINDOWS_INTERNET_SETTINGS, '/v', 'AutoConfigURL', '/f'])
+    } catch (e) {
+      // 键本来就不存在时 reg delete 返回非 0 退出码，属正常情况
+      log.debug('清除 AutoConfigURL 时未找到该键（可能本来就未设置）')
+    }
+    await execFile('reg.exe', ['add', WINDOWS_INTERNET_SETTINGS, '/v', 'ProxyEnable', '/t', 'REG_DWORD', '/d', '0', '/f'])
+    log.info('已清除系统 PAC 自动配置')
+  }
+  await notifyWindowsInternetSettingsChanged()
+}
+
 const executor = {
   async windows (exec, params = {}) {
-    const { ip, port, setEnv, setCaBundle } = params
+    const { ip, port, setEnv, setCaBundle, pac, pacUrl } = params
+
+    if (pac === true) {
+      // PAC 自动分流：只写 AutoConfigURL，不碰固定代理（两者互斥）
+      await setWindowsPacProxy(pacUrl)
+      return true
+    }
+
     if (ip != null) { // 设置代理
       // 延迟加载config
       loadConfig()
@@ -799,7 +856,29 @@ const executor = {
     }
   },
   async linux (exec, params = {}) {
-    const { ip, port, setEnv } = params
+    const { ip, port, setEnv, pac, pacUrl } = params
+
+    if (pac === true) {
+      try {
+        if (pacUrl) {
+          await exec([
+            `gsettings set org.gnome.system.proxy autoconfig-url '${pacUrl}'`,
+            'gsettings set org.gnome.system.proxy mode \'auto\'',
+          ])
+          log.info(`已设置系统 PAC 自动配置：${pacUrl}`)
+        } else {
+          await exec([
+            'gsettings set org.gnome.system.proxy autoconfig-url \'\'',
+            'gsettings set org.gnome.system.proxy mode \'none\'',
+          ])
+          log.info('已清除系统 PAC 自动配置')
+        }
+      } catch (e) {
+        log.warn('gsettings 设置 PAC 失败（可能无桌面环境）')
+      }
+      return true
+    }
+
     if (ip != null) { // 设置代理
       // 延迟加载config
       loadConfig()
@@ -848,7 +927,30 @@ const executor = {
   },
   async mac (exec, params = {}) {
     const wifiAdaptor = await getMacNetworkService(exec)
-    const { ip, port, setEnv } = params
+    const { ip, port, setEnv, pac, pacUrl } = params
+
+    if (pac === true) {
+      const pacCmds = pacUrl
+        ? [
+            `networksetup -setautoproxyurl "${wifiAdaptor}" "${pacUrl}"`,
+            `networksetup -setautoproxystate "${wifiAdaptor}" on`,
+          ]
+        : [`networksetup -setautoproxystate "${wifiAdaptor}" off`]
+      try {
+        for (const cmd of pacCmds) {
+          await exec(cmd)
+        }
+      } catch (e) {
+        if (e.code === MACOS_NETWORKSETUP_PERMISSION_ERROR_CODE) {
+          log.warn('networksetup 命令需要管理员权限（exit code 14），正在弹出系统授权对话框...')
+          await sudoExecMac(pacCmds.join(' && '))
+        } else {
+          throw e
+        }
+      }
+      log.info(pacUrl ? `已设置系统 PAC 自动配置：${pacUrl}` : '已清除系统 PAC 自动配置')
+      return true
+    }
 
     let cmds
     if (ip != null) { // 设置代理
