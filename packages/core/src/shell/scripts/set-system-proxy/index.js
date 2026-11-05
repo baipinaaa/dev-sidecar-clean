@@ -630,40 +630,35 @@ function removeProxyEnvFromShellProfile () {
 const WINDOWS_INTERNET_SETTINGS = 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings'
 
 /**
- * 广播「系统代理配置已变更」。
+ * 设置 / 清除 Windows 的 PAC 自动配置。
  *
- * 直接写注册表的话，已经运行的程序不会立即感知：
- *   - Chromium 系自己有注册表监听，通常 1 秒内会跟上；
- *   - WinHTTP / WinINET 系程序需要 InternetSetOption 才会刷新（否则一直用旧值）。
- * 这两个选项是 Windows 官方推荐的通知方式：
- *   INTERNET_OPTION_SETTINGS_CHANGED = 39，INTERNET_OPTION_REFRESH = 37
- */
-async function notifyWindowsInternetSettingsChanged () {
-  const script = [
-    '$sig = \'[DllImport("wininet.dll", SetLastError=true)] public static extern bool InternetSetOption(IntPtr h, int o, IntPtr b, int l);\'',
-    '$t = Add-Type -MemberDefinition $sig -Name WinInet -Namespace DsPac -PassThru',
-    '$null = $t::InternetSetOption([IntPtr]::Zero, 39, [IntPtr]::Zero, 0)',
-    '$null = $t::InternetSetOption([IntPtr]::Zero, 37, [IntPtr]::Zero, 0)',
-  ].join('; ')
-  try {
-    await execFile('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', script])
-  } catch (e) {
-    log.warn('广播系统代理变更失败（写入已生效，部分程序可能需要重启才能感知）:', e && e.message ? e.message : e)
-  }
-}
-
-/**
- * 设置 / 清除 Windows 的 PAC 自动配置（AutoConfigURL）。
- *
- * 这条路径刻意**不经过** @starknt/sysproxy：它的 manual 模式会把 AutoConfigURL 清掉，
- * 二者互斥。PAC 模式必须由我们自己独占写入，否则会被系统代理开关反复覆盖。
+ * 必须走 `sysproxy.exe pac`：它用 INTERNET_PER_CONN_OPTION 全量写入并负责广播，
+ * 会把 `DefaultConnectionSettings` 一并更新。
+ * 如果只 `reg add AutoConfigURL` 再调 InternetSetOption 广播，WinINET 会用
+ * `DefaultConnectionSettings` 里的旧快照把刚写的值覆盖回去——现象就是
+ * "日志显示设置成功，十几秒后 PAC 自己消失了"。
  */
 async function setWindowsPacProxy (pacUrl) {
+  const proxyPath = extraPath.getProxyExePath()
+  try {
+    if (pacUrl) {
+      await execFile(proxyPath, ['pac', pacUrl])
+      log.info(`已设置系统 PAC 自动配置：${pacUrl}`)
+    } else {
+      // set 1 = 直接连接（INTERNET_PER_CONN_FLAGS 的 direct 位），同时清掉 PAC 与固定代理
+      await execFile(proxyPath, ['set', '1'])
+      log.info('已清除系统 PAC 自动配置')
+    }
+    return
+  } catch (e) {
+    log.warn('sysproxy.exe 设置 PAC 失败，回退到注册表写入：', e && e.message ? e.message : e)
+  }
+
+  // 回退路径：只写注册表，且**不广播**（广播会把刚写的值冲掉）
   if (pacUrl) {
     await execFile('reg.exe', ['add', WINDOWS_INTERNET_SETTINGS, '/v', 'AutoConfigURL', '/t', 'REG_SZ', '/d', pacUrl, '/f'])
-    // PAC 模式下必须关掉固定代理，否则固定代理优先级更高，PAC 不会生效
     await execFile('reg.exe', ['add', WINDOWS_INTERNET_SETTINGS, '/v', 'ProxyEnable', '/t', 'REG_DWORD', '/d', '0', '/f'])
-    log.info(`已设置系统 PAC 自动配置：${pacUrl}`)
+    log.info(`已设置系统 PAC 自动配置（注册表回退）：${pacUrl}`)
   } else {
     try {
       await execFile('reg.exe', ['delete', WINDOWS_INTERNET_SETTINGS, '/v', 'AutoConfigURL', '/f'])
@@ -672,9 +667,8 @@ async function setWindowsPacProxy (pacUrl) {
       log.debug('清除 AutoConfigURL 时未找到该键（可能本来就未设置）')
     }
     await execFile('reg.exe', ['add', WINDOWS_INTERNET_SETTINGS, '/v', 'ProxyEnable', '/t', 'REG_DWORD', '/d', '0', '/f'])
-    log.info('已清除系统 PAC 自动配置')
+    log.info('已清除系统 PAC 自动配置（注册表回退）')
   }
-  await notifyWindowsInternetSettingsChanged()
 }
 
 const executor = {
