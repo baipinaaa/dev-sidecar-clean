@@ -81,9 +81,12 @@ function addPatterns (target, patterns) {
   }
   const keys = Array.isArray(patterns) ? patterns : Object.keys(patterns)
   for (const key of keys) {
-    // 值为 false 的规则表示显式关闭，不参与匹配
-    if (!Array.isArray(patterns) && patterns[key] === false) {
-      continue
+    // 值为 false/null 的规则表示显式关闭（服务分组里被关掉的项），不参与匹配
+    if (!Array.isArray(patterns)) {
+      const value = patterns[key]
+      if (value === false || value == null) {
+        continue
+      }
     }
     const regex = toPacRegex(key)
     if (regex != null) {
@@ -94,6 +97,10 @@ function addPatterns (target, patterns) {
 
 /**
  * 收集「应该走代理」的匹配串
+ *
+ * 这些就是「服务分组」页面里启用的服务，加上 ECH 域名：
+ *   intercepts / preSetIpList / dns.mapping / dns.ech.domains / dns.nat64.domains
+ * 其余域名一律不经过系统代理（PAC 默认 DIRECT），这样本机防火墙规则才能生效。
  */
 function collectProxyRules (config) {
   const rules = []
@@ -101,7 +108,15 @@ function collectProxyRules (config) {
   addPatterns(rules, config.preSetIpList)
   if (config.dns) {
     addPatterns(rules, config.dns.mapping)
+    // ECH 需要本地终结 TLS，域名必须走代理；配置在 dns.ech.domains 下
+    if (config.dns.ech) {
+      addPatterns(rules, config.dns.ech.domains)
+    }
+    if (config.dns.nat64) {
+      addPatterns(rules, config.dns.nat64.domains)
+    }
   }
+  // 兼容旧结构（早期版本把 ech 放在顶层）
   if (config.ech) {
     addPatterns(rules, config.ech.domains)
   }
