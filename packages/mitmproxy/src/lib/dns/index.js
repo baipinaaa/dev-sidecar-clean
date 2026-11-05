@@ -399,21 +399,87 @@ module.exports = {
       return ech
     }
 
-    // 串行兜底：保持优先级确定性，不竞速
+    // 【定制版修复】兜底不能串行：单个 DoH 超时就是 8 秒（实测 quad9-ip / cf-ip 全部超时），
+    // 串行 9 个 = 72 秒，页面会一直卡在加载动画（ldstatic.com 就是这么卡死的）。
+    // 改为小批并发 + 提供方冷却 + 总预算：每批同时问 3 个，任一返回即用；
+    // 失败过的提供方冷却 2 分钟，避免每个新域名都白等一轮超时。
+    const candidates = []
     for (const dns of fallback) {
-      if (dns == null || primary.includes(dns) || !dns.echEnabled) {
+      if (dns == null || primary.includes(dns) || !dns.echEnabled || candidates.includes(dns)) {
         continue
       }
-      try {
-        const result = await dns.lookupEch(hostname)
-        if (result != null) {
-          log.warn(`[ECH] 首选DNS均未返回ECH参数，改用 '${dns.dnsName}' 兜底: ${hostname} ➜ ${result.publicName}`)
-          return result
+      candidates.push(dns)
+    }
+
+    const cooldown = this._echProviderCooldown || (this._echProviderCooldown = new Map())
+    const now = Date.now()
+    // 冷却过的提供方直接跳过：它们刚才连不上，每个新域名重试一遍只会把首屏拖死。
+    // 全部都在冷却中就不兜底（ECH 拿不到时上层会退回普通 DNS + 正常握手）。
+    const pool = candidates.filter(dns => (cooldown.get(dns.dnsName) || 0) <= now)
+    if (pool.length === 0) {
+      log.debug(`[ECH] 所有兜底DNS均在冷却中，跳过兜底: ${hostname}`)
+      return null
+    }
+
+    const deadline = now + 5000
+
+    // 单个查询也要受预算约束：DoH 自身超时是 8 秒，整批 await 完就白等了，
+    // 这里用 race 把「超过剩余预算」直接当作失败（未完成的查询在后台自生自灭，
+    // 它自己的 catch 已注册，不会变成 unhandledRejection）。
+    const raceDeadline = (promise, ms) => new Promise((resolve) => {
+      let settled = false
+      const timer = setTimeout(() => {
+        if (settled) {
+          return
         }
-      } catch (e) {
-        log.warn(`[ECH] 兜底DNS '${dns.dnsName}' 查询ECH参数失败: ${hostname}, error:`, e)
+        settled = true
+        resolve({ status: 'timeout' })
+      }, Math.max(0, ms))
+      promise.then(
+        (value) => {
+          if (settled) {
+            return
+          }
+          settled = true
+          clearTimeout(timer)
+          resolve({ status: 'fulfilled', value })
+        },
+        (reason) => {
+          if (settled) {
+            return
+          }
+          settled = true
+          clearTimeout(timer)
+          resolve({ status: 'rejected', reason })
+        },
+      )
+    })
+
+    // 【为何不再分批】分批会让「未问过的提供方」在下一轮域名上重新白等一遍；
+    // 这些公共 DoH 在国内要么整段可达要么整段不可达，所以一次全发、一次冷却到位。
+    // 代价：primary 失败时会有最多 9 个 DoH 请求并发（每域名一次，结果有缓存）。
+    const remain = deadline - Date.now()
+    const results = await Promise.all(pool.map(dns => raceDeadline(dns.lookupEch(hostname), remain)))
+    for (let j = 0; j < results.length; j++) {
+      const r = results[j]
+      const dns = pool[j]
+      if (r.status === 'fulfilled' && r.value != null) {
+        cooldown.delete(dns.dnsName)
+        log.warn(`[ECH] 首选DNS均未返回ECH参数，改用 '${dns.dnsName}' 兜底: ${hostname} ➜ ${r.value.publicName}`)
+        return r.value
+      }
+      if (r.status === 'rejected') {
+        log.warn(`[ECH] 兜底DNS '${dns.dnsName}' 查询ECH参数失败: ${hostname}, error:`, r.reason)
       }
     }
+
+    // 本轮全失败：把这一批（含超时未返回的）全部冷却 60 秒，
+    // 避免每个新域名都重新等一轮超时（ldstatic.com 卡死就是这么来的）。
+    const until = Date.now() + 60 * 1000
+    for (const dns of pool) {
+      cooldown.set(dns.dnsName, until)
+    }
+    log.warn(`[ECH] 兜底DNS本轮全部失败，冷却 60 秒: ${pool.map(d => d.dnsName).join(', ')}`)
 
     return null
   },
