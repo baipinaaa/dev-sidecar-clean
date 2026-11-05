@@ -183,32 +183,9 @@ function createFragmentForwarder ({ source, target, head, size, maxBytes, log = 
 
   let pending = head && head.length > 0 ? [head] : []
 
-  const passThrough = () => {
-    if (pending.length > 0) {
-      for (const chunk of pending) {
-        target.write(chunk)
-      }
-      pending = []
-    }
-    if (!source.readableEnded) {
-      source.resume()
-    }
-  }
-
-  const onData = (chunk) => {
-    if (!state.isFirst) {
-      if (!target.write(chunk)) {
-        source.pause()
-        target.once('drain', () => source.resume())
-      }
-      return
-    }
-
+  // 发送「首包」：TLS ClientHello 才分段，其它（明文 HTTP 等）原样直通
+  const sendFirst = (first) => {
     state.isFirst = false
-    source.pause()
-
-    const first = pending.length > 0 ? Buffer.concat([...pending, chunk]) : chunk
-    pending = []
     state.firstLen = first.length
 
     if (!isTlsClientHello(first)) {
@@ -239,6 +216,21 @@ function createFragmentForwarder ({ source, target, head, size, maxBytes, log = 
       })
   }
 
+  const onData = (chunk) => {
+    if (!state.isFirst) {
+      if (!target.write(chunk)) {
+        source.pause()
+        target.once('drain', () => source.resume())
+      }
+      return
+    }
+
+    source.pause()
+    const first = pending.length > 0 ? Buffer.concat([...pending, chunk]) : chunk
+    pending = []
+    sendFirst(first)
+  }
+
   source.on('data', onData)
   source.on('end', () => {
     if (pending.length > 0) {
@@ -257,17 +249,15 @@ function createFragmentForwarder ({ source, target, head, size, maxBytes, log = 
     }
   })
 
-  // 客户端迟迟不发数据时，head 也不能一直挂着
-  const headTimer = setTimeout(() => {
-    if (state.isFirst && pending.length > 0) {
-      state.isFirst = false
-      passThrough()
-    }
-  }, 2000)
-  if (typeof headTimer.unref === 'function') {
-    headTimer.unref()
+  // 【关键】head 里通常已经是一个完整首包（浏览器会把 CONNECT 与 ClientHello 放在同一个包里发出）。
+  // 必须立刻处理：此前这里挂的是 2 秒的兜底定时器，导致每条新建的 TLS 连接都白等 2 秒，
+  // 表现为「首屏要等很久、连接复用后就不再卡、过一阵连接池回收又重新变慢」。
+  if (pending.length > 0) {
+    const first = Buffer.concat(pending)
+    pending = []
+    source.pause()
+    sendFirst(first)
   }
-  source.once('close', () => clearTimeout(headTimer))
 
   return state
 }
