@@ -1210,6 +1210,25 @@ Object.assign(defaultConfig.server, {
     // 配置示例（pixiv 这类「IP 不通」的站点加了也没用，请先用 fingerprint 测 TCP 是否可达）：
     //   'pixiv.net': { '.*': { fingerprint: 'chrome_149', fingerprintTimeout: 20000 } },
   },
+  // 动态上游：为这些域名额外解析上游 CNAME 的 A 记录，作为 preSetIpList 之外的候选地址。
+  // 对应 S302 规则里的 `dynamic a <上游域名> 443`：Akamai 边缘 IP 会持续轮换，也会被逐个阻断，
+  // 预置 IP 全部失效时原本只能干等 7 秒超时；这里让候选池每 60 秒现查一次，与预置 IP 合并后
+  // 一起参与测速、并行拨号与失败切换（Host 头不变，仍按站点路由，只是换一个更近的边缘节点）。
+  // 日志关键字：[dynamic]
+  dynamicUpstreams: {
+    '*steamcommunity.com': [
+      'steamuserimages-a.akamaihd.net.edgesuite.net',
+      'steamstore-a.akamaihd.net.edgesuite.net',
+      'eaassets-a.akamaihd.net.edgesuite.net',
+      'steamcommunity-a.akamaihd.net.edgesuite.net',
+    ],
+    '^(store|checkout|login|help|api)\\.steampowered\\.com$': [
+      'steamuserimages-a.akamaihd.net.edgesuite.net',
+      'steamstore-a.akamaihd.net.edgesuite.net',
+      'eaassets-a.akamaihd.net.edgesuite.net',
+      'steamcommunity-a.akamaihd.net.edgesuite.net',
+    ],
+  },
   preSetIpList: {
     'github.com': {
       '20.200.245.247': true,

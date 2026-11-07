@@ -6,6 +6,15 @@ const svcbUtil = require('./util.svcb')
 const { DynamicChoice } = require('../choice/index')
 const os = require('node:os')
 const net = require('node:net')
+const dnsPromises = require('node:dns').promises
+
+// 动态上游（dynamicUpstreams）解析结果缓存：
+// Akamai 等 CDN 的边缘 IP 会持续轮换/被阻断，静态预置 IP 一失效就没有退路。
+// 这里对配置了上游域名的站点，按 TTL 实时解析其 CNAME 的 A 记录作为候选补充。
+const dynamicUpstreamCache = new Map()
+const DYNAMIC_UPSTREAM_TIMEOUT = 1500 // 单个上游域名的解析超时
+const DYNAMIC_UPSTREAM_TTL = 60 * 1000 // 解析成功后的缓存时间
+const DYNAMIC_UPSTREAM_FAIL_TTL = 10 * 1000 // 解析失败后的重试间隔，避免每个请求都打 DNS
 
 // 启动时检测系统是否有 IPv6 网络能力（遍历本机网卡），无则过滤所有 IPv6 DNS 结果
 // 注意：忽略 fe80::/10 本地链路地址，它们不代表实际上游 IPv6 连通性
@@ -112,6 +121,9 @@ module.exports = class BaseDNS {
     this.dnsName = dnsName
     this.dnsType = dnsType
     this.preSetIpList = preSetIpList
+    // 动态上游域名表：{ '<域名模式>': ['上游CNAME1', '上游CNAME2', ...] }
+    // 由 initDNS 统一注入，用于在预置 IP 之外补充「现查现用」的候选地址
+    this.dynamicUpstreams = null
 
     this.cache = new LRUCache({
       maxSize: (cacheSize > 0 ? cacheSize : defaultCacheSize),
@@ -444,7 +456,80 @@ module.exports = class BaseDNS {
     }
   }
 
+  /**
+   * 动态上游：解析该域名对应的上游 CNAME 的 A 记录，作为预置 IP 之外的候选补充。
+   * 对应 S302 规则里的 `dynamic a <域名> 443`（每次拨号现查 DNS）。
+   */
+  async _lookupDynamicUpstreams (hostname) {
+    const cfg = this.dynamicUpstreams
+    if (cfg == null) {
+      return []
+    }
+
+    let matched = null
+    try {
+      matched = matchUtil.matchHostname(cfg, hostname, 'matched dynamicUpstreams')
+    } catch (e) {
+      return []
+    }
+    if (matched == null) {
+      return []
+    }
+
+    let list = null
+    if (Array.isArray(matched)) {
+      list = matched
+    } else if (typeof matched === 'string') {
+      list = [matched]
+    } else if (typeof matched === 'object') {
+      list = Object.keys(matched).filter(k => matched[k])
+    }
+    if (list == null || list.length === 0) {
+      return []
+    }
+
+    const cacheKey = list.join('|')
+    const now = Date.now()
+    const cached = dynamicUpstreamCache.get(cacheKey)
+    if (cached != null && cached.expire > now) {
+      return cached.ips
+    }
+
+    const ips = []
+    const seen = new Set()
+    await Promise.all(list.map(async (upstream) => {
+      try {
+        const addrs = await Promise.race([
+          dnsPromises.resolve4(upstream),
+          new Promise((resolve, reject) => setTimeout(() => reject(new Error('timeout')), DYNAMIC_UPSTREAM_TIMEOUT)),
+        ])
+        for (const ip of addrs) {
+          if (!seen.has(ip)) {
+            seen.add(ip)
+            ips.push(ip)
+          }
+        }
+      } catch (e) {
+        log.warn(`[dynamic] 解析上游 ${upstream} 失败: ${e.message}`)
+      }
+    }))
+
+    dynamicUpstreamCache.set(cacheKey, {
+      ips,
+      expire: now + (ips.length > 0 ? DYNAMIC_UPSTREAM_TTL : DYNAMIC_UPSTREAM_FAIL_TTL),
+    })
+    if (ips.length > 0) {
+      log.info(`[dynamic] ${hostname} 动态上游解析到 ${ips.length} 个地址: ${ips.join(',')}`)
+    }
+    return ips
+  }
+
   async _lookupWithPreSetIpList (hostname, options = {}) {
+    // 先取动态上游候选（带缓存，未配置时立即返回空数组）
+    const dynamicIps = await this._lookupDynamicUpstreams(hostname)
+
+    let ipList = null
+
     // ECH域名强制忽略预设IP：预设IP往往是域名自身的源站IP，不支持ECH，会导致ECH握手失败
     if (this.preSetIpList && options.ignorePreSetIpList !== true) {
       // 获取当前域名的预设IP列表
@@ -459,12 +544,30 @@ module.exports = class BaseDNS {
         if (hostnamePreSetIpList.length > 0) {
           hostnamePreSetIpList.isPreSet = true
           log.info(`[DNS-over-PreSet '${this.dnsName}'] 获取到该域名的预设IP列表： ${hostname} - ${JSON.stringify(hostnamePreSetIpList)}`)
-          return hostnamePreSetIpList
+          ipList = hostnamePreSetIpList
         }
       }
     }
 
-    return await this._lookup(hostname, options)
+    if (ipList == null) {
+      ipList = await this._lookup(hostname, options)
+    }
+
+    if (dynamicIps.length === 0) {
+      return ipList
+    }
+
+    // 预置 IP 在前（已实测可用者优先），动态解析到的地址追加在后
+    const merged = Array.isArray(ipList) ? ipList.slice() : []
+    for (const ip of dynamicIps) {
+      if (!merged.includes(ip)) {
+        merged.push(ip)
+      }
+    }
+    if (ipList != null && ipList.isPreSet === true) {
+      merged.isPreSet = true
+    }
+    return merged
   }
 
   async _lookup (hostname, options = {}) {

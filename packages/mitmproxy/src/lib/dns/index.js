@@ -134,6 +134,17 @@ module.exports = {
       log.info(`已启用NAT64：域名 ${JSON.stringify(nat64Options.domains)}, 前缀: ${nat64Dns.prefix}, 解析用DNS: ${nat64Options.dns || '默认'}, DoH: ${nat64Dns.dohList.join(' | ')}`)
     }
 
+    // 动态上游：把配置注入到每个 DNS 实例（只在域名命中时才真正去解析 CNAME）
+    // 对应 S302 规则中的 `dynamic a <域名> 443`：不把 CDN 边缘 IP 写死，而是每次现查
+    if (options.dynamicUpstreams != null) {
+      for (const name in dnsMap) {
+        const dns = dnsMap[name]
+        if (dns != null) {
+          dns.dynamicUpstreams = options.dynamicUpstreams
+        }
+      }
+    }
+
     log.info(`设置SNI默认使用的DNS为 '${dnsMap.ForSNI.dnsName}'（注：当某个域名配置了SNI但未配置DNS时，将默认使用该DNS）`)
 
     return dnsMap

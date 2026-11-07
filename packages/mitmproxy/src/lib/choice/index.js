@@ -3,10 +3,11 @@ const log = require('../../utils/util.log.server')
 
 const cacheSize = 1024
 
-// 坏地址拉黑时长：首次 2 分钟，连续失败翻倍，上限 15 分钟
-// （浏览器对连不通的地址也只是短时间内不再尝试，而不是永远不用）
-const BAN_BASE_MS = 2 * 60 * 1000
-const BAN_MAX_MS = 15 * 60 * 1000
+// 坏地址拉黑时长：首次 30 秒，连续失败翻倍，上限 5 分钟
+// 对齐 S302 的 fail_duration 30s / max_fails 2：CDN 边缘 IP 会被间歇性阻断，
+// 禁得太久会错过它恢复可用的窗口（实测同一个 IP 十几分钟后就又通了）。
+const BAN_BASE_MS = 30 * 1000
+const BAN_MAX_MS = 5 * 60 * 1000
 
 class ChoiceCache {
   constructor () {
@@ -206,7 +207,7 @@ class DynamicChoice {
       count.error++ // 失败次数+1
       count.keepErrorCount++ // 连续失败次数+1
       if (typeof ip === 'string') {
-        // 拉黑刚失败的地址：连续失败越多，拉黑越久（2min → 4min → 8min → 15min 封顶）
+        // 拉黑刚失败的地址：连续失败越多，拉黑越久（30s → 1min → 2min → 5min 封顶）
         const banMs = Math.min(BAN_BASE_MS * Math.pow(2, Math.max(0, count.keepErrorCount - 1)), BAN_MAX_MS)
         count.banUntil = Date.now() + banMs
         log.info(`地址失败拉黑 ${Math.round(banMs / 1000)}s: ${this.key} ➜ ${ip}`)

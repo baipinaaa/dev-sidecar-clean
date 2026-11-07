@@ -129,6 +129,10 @@ module.exports = (serverConfig) => {
       dnsMap: dnsUtil.initDNS(serverConfig.dns.providers, preSetIpList, {
         ech: echConfig,
         nat64: { ...nat64Config, enabled: isNat64Enabled },
+        // 动态上游：为这些域名额外解析上游 CNAME 的 A 记录，作为预置 IP 的补充候选
+        dynamicUpstreams: serverConfig.dynamicUpstreams != null
+          ? matchUtil.domainMapRegexply(serverConfig.dynamicUpstreams)
+          : null,
       }),
       mapping: matchUtil.domainMapRegexply(dnsMapping),
       speedTest: serverConfig.dns.speedTest,

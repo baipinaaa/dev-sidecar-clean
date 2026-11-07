@@ -137,9 +137,11 @@ function connect (req, cltSocket, head, hostname, port, dnsConfig = null, isDire
     const options = {
       port,
       host: hostname,
-      connectTimeout: 10000,
+      // 【定制版】原来 10000ms：预置 IP 全部不通时要干等 10 秒才换下一个，
+      // 页面表现为卡 7~14 秒后报超时（S302 是同一条链路 dial_timeout 2s + 快速换址）。
+      connectTimeout: 2500,
       // 【定制版】Happy Eyeballs（RFC 8305）：同一域名有多个地址时并行拨号，
-      // 250ms 阶梓起下一个，先连通者胜；坏 IP 不再拖到 connect 超时。
+      // 250ms 阶梯起下一个，先连通者胜；坏 IP 不再拖到 connect 超时。
       // 配合 dnsLookup.js 的 all 模式回传全部候选地址生效（Node 20+）。
       autoSelectFamily: true,
       autoSelectFamilyAttemptTimeout: 250,
