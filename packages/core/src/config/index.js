@@ -1438,13 +1438,24 @@ Object.assign(defaultConfig.server, {
       '151.101.79.52': true,
     },
     'cdn.steamcommunity.com': {
-      '23.221.227.5': true,
+      '23.200.230.137': true,
+      '23.200.230.138': true,
+      '23.221.227.5': false,
     },
     '*.steamcommunity.com': {
-      // 104.79.200.218 实测 tcp=252ms / tls=734ms / total=1244ms，比前两个慢 3 倍以上，
-      // 留着它只会在前两个 IP 失败时把请求拖入超时。
-      '23.209.217.19': true,
-      '23.15.140.216': true,
+      // 2026-11-07 实测：旧的 23.209.x / 23.15.140.x / 104.79.200.218 / 23.221.227.5
+      // 整段 TCP 443 全部超时（Akamai 边缘漂移 + 段被阻断），页面直接卡到 14s 后 500。
+      // 现改为从 steamcommunity-a.akamaihd.net.edgesuite.net 等 CNAME 解析出的当前边缘：
+      // TCP 20~41ms，SNI=baidu.com + Host=steamcommunity.com 实测 200 OK。
+      // 这些域名可被国内 DNS 正常解析，是 GetFreshIP 之外最可靠的取址来源。
+      '23.200.230.145': true,
+      '23.200.230.175': true,
+      '23.200.230.137': true,
+      '23.200.230.138': true,
+      '23.2.16.115': true,
+      '23.2.16.80': true,
+      '23.209.217.19': false,
+      '23.15.140.216': false,
       '104.79.200.218': false,
     },
     '^(store|checkout).steampowered.com$': {
