@@ -1,8 +1,8 @@
 # DevSidecar Clean
 
+<h3 align="center">本项目由 <strong>DeepSeek-V4.1-Flash-1017</strong> 制作</h3>
+
 > 基于 [docmirror/dev-sidecar](https://github.com/docmirror/dev-sidecar) 二次开发的本地 MITM 代理，专注**隐私**、**稳定**与**实测可用**。
->
-> 本项目由 **DS-1017-FLASH** 制作
 
 ---
 
@@ -18,17 +18,7 @@
 
 ## 二、相对原项目改进了什么
 
-### 2.1 修复致命缺陷
-
-| 问题 | 现象 | 处理 |
-|---|---|---|
-| CONNECT 隧道不转发数据 | 所有 HTTPS 页面打不开，端口仍回 `200 Connection Established` | 修复 `tlsFragment` 作用域错误 |
-| 每条新连接白等 2 秒 | 首屏卡顿，连接复用后恢复，过一阵又卡 | 首包到达即转发，移除 2 秒兜底定时器 |
-| 国内网站全量走代理 | 除 GitHub 外全部变慢 | 修正规则匹配导致的误接管 |
-| `ENHANCED_SECTIONS is not defined` | 启动即崩溃 | 修复配置加载 |
-| 日志明文落盘 | Cookie / `Authorization` 被写进日志文件 | 补全脱敏正则，默认只记录头名 |
-
-### 2.2 DNS 与 ECH
+### 2.1 DNS 与 ECH
 
 - DoH 客户端按 Chromium 行为重写：补 `User-Agent`、`Accept`、重试与连接复用
 - 修复 Cloudflare 托管域名「SNI 伪装必然 403」的错误配置
@@ -37,16 +27,17 @@
 - A 记录兜底同样加 5 秒总预算，不再逐个超时
 - `linux.do` / `pixiv.net` 改用实测可用的 DoT 提供方
 
-### 2.3 Steam 加速
+### 2.2 Steam 加速
 
 - 按实测重定 SNI 策略：Steam 社区用伪装 SNI，`api/login.steampowered.com` 用真实 SNI（伪装会触发握手失败）
 - 抹除 `Alt-Svc` 响应头，阻止浏览器升级 HTTP/3 绕开代理
 - 静态资源本地缓存 30 天
 - 更新 Steam 社区边缘 IP（旧 Akamai 段已全部不通，原表现为卡 14 秒后 `500`）
 
-### 2.4 隐私与安全
+### 2.3 隐私与安全
 
 - 删除百度统计（`hm.baidu.com` 上报、路由切换上报）
+- 日志脱敏补全：Cookie / `Authorization` 不再明文写入日志文件
 - 删除启动时自动检查更新
 - 远程配置由「24 小时自动拉取」改为**手动触发**
 - 删除远程 JS 注入（原可在 `github.com` 同源上下文执行作者下发的脚本）
