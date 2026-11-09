@@ -867,6 +867,12 @@ Object.assign(defaultConfig.server, {
         ],
       },
     },
+    'huggingface.co': {
+      '.*': {
+        sni: 'huggingface.cn',
+        verifyHost: 'huggingface.cn',
+      },
+    },
     '*.huggingface.co': {
       '.*': {
         sni: 'huggingface.cn',
@@ -1216,6 +1222,11 @@ Object.assign(defaultConfig.server, {
   // 一起参与测速、并行拨号与失败切换（Host 头不变，仍按站点路由，只是换一个更近的边缘节点）。
   // 日志关键字：[dynamic]
   dynamicUpstreams: {
+    // huggingface.co 自身在国内不可达（实测 103.73.161.52 直接超时），
+    // 但它和 huggingface.cn 在同一个 CloudFront 分发上：用 huggingface.cn 的
+    // 边缘 IP + SNI=huggingface.cn + Host=huggingface.co 就能正常打开（实测 200/174ms）。
+    // 边缘 IP 会漂移，所以现查而不是写死。
+    '*huggingface.co': ['huggingface.cn'],
     '*steamcommunity.com': [
       'steamuserimages-a.akamaihd.net.edgesuite.net',
       'steamstore-a.akamaihd.net.edgesuite.net',
@@ -1373,9 +1384,8 @@ Object.assign(defaultConfig.server, {
         desc: '自动地区官方',
       },
     },
-    '*.huggingface.co': {
-      '3.167.200.113': true,
-    },
+    // huggingface 的旧预置 IP（3.167.200.113）已失效：返回 421 Misdirected Request，
+    // 保留只会在每次解析时先撞一次错。改由上方 dynamicUpstreams 现查 huggingface.cn。
     '*.greasyfork.org': {
       '96.126.98.220': true,
       '50.116.4.196': true,

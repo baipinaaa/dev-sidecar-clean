@@ -60,7 +60,16 @@ function toPacRegex (pattern) {
   if (pattern[0] === '^') {
     source = pattern
   } else if (pattern.indexOf('*') >= 0 || pattern.indexOf('?') >= 0) {
-    source = '^' + pattern
+    let source0 = pattern
+    let prefix = ''
+    // `*.example.com` 必须同时覆盖根域 `example.com`：
+    // 浏览器打开 https://example.com/ 时不会命中 `^.*\.example\.com$`，
+    // 于是被 PAC 判成 DIRECT 直连 —— 对于被墙的站点就等于直接打不开。
+    if (source0.startsWith('*.')) {
+      prefix = '(.+\\.)?'
+      source0 = source0.slice(2)
+    }
+    source = '^' + prefix + source0
       .replace(/\./g, '\\.')
       .replace(/\*/g, '.*')
       .replace(/\?/g, '.') + '$'
